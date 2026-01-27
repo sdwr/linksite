@@ -4,6 +4,8 @@
 beautifulsoup4
 requests
 html5lib
+trafilatura
+feedparser
 
 # YouTube content extraction
 yt-dlp
@@ -15,6 +17,10 @@ torch
 # Database
 supabase
 pgvector
+
+# Web framework
+fastapi
+uvicorn
 
 # Utilities
 python-dotenv

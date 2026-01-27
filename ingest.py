@@ -10,9 +10,9 @@ import re
 from typing import Dict, Optional, List
 from urllib.parse import urlparse, parse_qs
 
-import yt_dlp
-from bs4 import BeautifulSoup
 import requests
+from bs4 import BeautifulSoup
+import trafilatura
 from sentence_transformers import SentenceTransformer
 
 
@@ -36,62 +36,48 @@ class ContentExtractor:
 
     def extract_youtube_content(self, url: str) -> Dict:
         """
-        Extract content from a YouTube video.
+        Extract content from a YouTube video using Invidious API.
 
         Returns:
-            dict: Contains 'title', 'channel_name', 'transcript', 'thumbnail'
+            dict: Contains 'title', 'channel_name', 'description', 'thumbnail'
         """
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': ['en'],
-            'skip_download': True,
-        }
-
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            # Extract video ID from URL
+            video_id = self._extract_youtube_id(url)
+            if not video_id:
+                raise Exception("Could not extract YouTube video ID")
 
-                # Extract basic metadata
-                title = info.get('title', '')
-                channel_name = info.get('channel', info.get('uploader', ''))
-                thumbnail = info.get('thumbnail', '')
+            # Use public Invidious instance
+            invidious_url = f"https://inv.tux.pizza/api/v1/videos/{video_id}"
 
-                # Extract transcript from automatic captions
-                transcript = ''
-                subtitles = info.get('automatic_captions', {})
+            response = requests.get(invidious_url, timeout=15)
+            response.raise_for_status()
 
-                if 'en' in subtitles:
-                    # Get the subtitle URL (prefer vtt format)
-                    sub_list = subtitles['en']
-                    for sub in sub_list:
-                        if sub.get('ext') == 'vtt' or sub.get('ext') == 'srv3':
-                            sub_url = sub.get('url')
-                            if sub_url:
-                                try:
-                                    sub_response = requests.get(sub_url, timeout=10)
-                                    if sub_response.status_code == 200:
-                                        transcript = self._parse_vtt(sub_response.text)
-                                        break
-                                except:
-                                    pass
+            data = response.json()
 
-                # Fallback to description if no transcript
-                if not transcript:
-                    transcript = info.get('description', '')
-
-                return {
-                    'title': title,
-                    'channel_name': channel_name,
-                    'transcript': transcript,
-                    'thumbnail': thumbnail,
-                    'type': 'youtube'
-                }
+            return {
+                'title': data.get('title', ''),
+                'channel_name': data.get('author', ''),
+                'transcript': data.get('description', ''),
+                'thumbnail': data.get('videoThumbnails', [{}])[0].get('url', '') if data.get('videoThumbnails') else '',
+                'type': 'youtube',
+                'tags': data.get('keywords', [])
+            }
 
         except Exception as e:
             raise Exception(f"Error extracting YouTube content: {str(e)}")
+
+    @staticmethod
+    def _extract_youtube_id(url: str) -> Optional[str]:
+        """Extract YouTube video ID from various URL formats."""
+        patterns = [
+            r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([^&\n?#]+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        return None
 
     @staticmethod
     def _parse_vtt(vtt_content: str) -> str:
@@ -116,16 +102,25 @@ class ContentExtractor:
 
     def extract_website_content(self, url: str) -> Dict:
         """
-        Extract content from a website.
+        Extract content from a website using Trafilatura.
 
         Returns:
             dict: Contains 'title', 'og_image', 'main_text'
         """
         try:
-            response = self.session.get(url, timeout=15)
-            response.raise_for_status()
+            # Fetch the webpage
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                raise Exception("Could not fetch URL")
 
-            soup = BeautifulSoup(response.content, 'html.parser')
+            # Extract main text content using trafilatura
+            main_text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
+
+            if not main_text:
+                main_text = ''
+
+            # Also parse with BeautifulSoup for metadata
+            soup = BeautifulSoup(downloaded, 'html.parser')
 
             # Extract OpenGraph metadata
             og_title = None
@@ -144,44 +139,59 @@ class ContentExtractor:
                 title_tag = soup.find('title')
                 og_title = title_tag.string if title_tag else ''
 
-            # Remove unwanted elements
-            for element in soup(['script', 'style', 'nav', 'header', 'footer',
-                                'aside', 'iframe', 'noscript', 'form']):
-                element.decompose()
-
-            # Remove common ad containers
-            ad_classes = ['ad', 'ads', 'advertisement', 'sidebar', 'menu',
-                         'navigation', 'comment', 'cookie', 'popup', 'modal']
-            for ad_class in ad_classes:
-                for element in soup.find_all(class_=re.compile(ad_class, re.I)):
-                    element.decompose()
-
-            # Extract main content
-            # Try to find main content area
-            main_content = (
-                soup.find('main') or
-                soup.find('article') or
-                soup.find('div', class_=re.compile(r'content|main|post|article', re.I)) or
-                soup.find('body')
-            )
-
-            if main_content:
-                # Get text and clean it up
-                text = main_content.get_text(separator=' ', strip=True)
-                # Remove excessive whitespace
-                text = re.sub(r'\s+', ' ', text)
-            else:
-                text = ''
-
             return {
                 'title': og_title,
                 'og_image': og_image,
-                'main_text': text,
+                'main_text': main_text,
                 'type': 'website'
             }
 
         except Exception as e:
             raise Exception(f"Error extracting website content: {str(e)}")
+
+
+def scrape_youtube(url: str) -> Dict:
+    """
+    Scrape YouTube video using Invidious API.
+
+    Args:
+        url: YouTube video URL
+
+    Returns:
+        dict: Video metadata including title, description, tags
+    """
+    extractor = ContentExtractor()
+    result = extractor.extract_youtube_content(url)
+
+    return {
+        'title': result['title'],
+        'description': result['transcript'],
+        'tags': result.get('tags', []),
+        'channel': result['channel_name'],
+        'thumbnail': result['thumbnail'],
+        'type': 'youtube'
+    }
+
+
+def scrape_article(url: str) -> Dict:
+    """
+    Scrape article/website content using Trafilatura.
+
+    Args:
+        url: Website URL
+
+    Returns:
+        dict: Article content including title and main text
+    """
+    extractor = ContentExtractor()
+    result = extractor.extract_website_content(url)
+
+    return {
+        'title': result['title'],
+        'description': result['main_text'],
+        'og_image': result['og_image'],
+        'type': 'website'
+    }
 
 
 def extract_content(url: str) -> Dict:

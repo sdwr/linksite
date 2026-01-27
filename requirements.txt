@@ -1,0 +1,21 @@
+# Core dependencies for link discovery game backend
+
+# Web scraping and parsing
+beautifulsoup4
+requests
+html5lib
+
+# YouTube content extraction
+yt-dlp
+
+# Vector embeddings
+sentence-transformers
+torch
+
+# Database
+supabase
+pgvector
+
+# Utilities
+python-dotenv
+tqdm

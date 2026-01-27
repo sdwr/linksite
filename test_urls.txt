@@ -1,0 +1,22 @@
+# Sample URLs for testing the link discovery game ingestion
+# Mix of YouTube videos and websites
+
+# YouTube videos
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+https://youtu.be/jNQXAC9IVRw
+
+# Tech/Science websites
+https://news.ycombinator.com/
+https://arstechnica.com/
+
+# Blogs and articles
+https://waitbutwhy.com/
+https://kottke.org/
+
+# Educational content
+https://www.wikipedia.org/
+https://www.khanacademy.org/
+
+# Creative/Art
+https://www.artsy.net/
+https://creativecoding.club/

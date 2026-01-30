@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronUp, ChevronDown, MessageSquare, Send } from 'lucide-react';
 import { MOCK_NETWORK, LinkNode, Connection } from '@/data/mockData';
 import { LinkCard } from './LinkCard';
+import { TimerBar } from './TimerBar';
+import { SatelliteList } from './SatelliteList';
 
 export const LinkView: React.FC = () => {
   const [currentLinkId, setCurrentLinkId] = useState<string>('link-a');
@@ -11,42 +13,85 @@ export const LinkView: React.FC = () => {
 
   if (!currentNode) return <div className="text-white">Node not found</div>;
 
-  // Helper to determine satellite positions
-  // Helper to determine satellite positions
-  const getPositionStyles = (pos: string): React.CSSProperties => {
-    switch (pos) {
-      case 'top': return { top: '5%', left: '50%', transform: 'translateX(-50%)' };
-      case 'left': return { top: '5%', left: '5%' };
-      case 'right': return { top: '5%', right: '5%' };
-      default: return {};
-    }
-  };
+  // Determine probabilities based on upvotes
+  const connectionsWithData = useMemo(() => {
+    return currentNode.connections.map(conn => {
+      const node = MOCK_NETWORK[conn.targetId];
+      return { ...conn, node };
+    }).filter(c => c.node);
+  }, [currentNode]);
 
-  // Helper for SVG line coordinates (approximate centers based on screen %)
-  const getLineCoordinates = (pos: string) => {
-    // Center of screen is 50% 50%
-    const center = { x: '50%', y: '50%' };
-    let target = { x: '50%', y: '50%' };
+  const probabilities = useMemo(() => {
+    if (connectionsWithData.length === 0) return {};
 
-    switch (pos) {
-      case 'top': target = { x: '50%', y: '10%' }; break;
-      case 'left': target = { x: '10%', y: '10%' }; break;
-      case 'right': target = { x: '90%', y: '10%' }; break;
-    }
-    return { x1: center.x, y1: center.y, x2: target.x, y2: target.y };
+    // Simple mock probability: relative upvotes
+    const totalUpvotes = connectionsWithData.reduce((sum, c) => sum + (c.node?.stats.upvotes || 0), 0);
+    const probs: Record<string, number> = {};
+
+    connectionsWithData.forEach(c => {
+      if (totalUpvotes === 0) probs[c.targetId] = 1 / connectionsWithData.length;
+      else probs[c.targetId] = (c.node?.stats.upvotes || 0) / totalUpvotes;
+    });
+
+    return probs;
+  }, [connectionsWithData]);
+
+  // Timer & Reveal Logic
+  const [revealedCount, setRevealedCount] = useState(0);
+  const DURATION = 10000; // 10 seconds per link
+  const SATELLITE_COUNT = Math.min(connectionsWithData.length, 5);
+
+  // Calculate markers for when to reveal satellites
+  // Distribute them evenly over the first 80% of the timer
+  const markers = useMemo(() => {
+    return Array.from({ length: SATELLITE_COUNT }).map((_, i) => {
+      // e.g. 5 items: 15%, 30%, 45%, 60%, 75%
+      return 15 * (i + 1);
+    });
+  }, [SATELLITE_COUNT]);
+
+  useEffect(() => {
+    setRevealedCount(0);
+  }, [currentLinkId]);
+
+  // Background Lines
+  // Calculate specific positions for the vertical list on the right
+  // The list is centered vertically.
+  // We want lines to go from center (50%, 50%) to the left edge of each list item.
+  // List is at right-12 (48px) + w-80 (320px). Left edge is ~right-368px.
+  // In screen width % (assuming 1920px), 370px is ~20%. So target X is 80%.
+
+  const getLineCoordinates = (index: number, total: number) => {
+    const centerX = '50%';
+    const centerY = '50%';
+
+    // Target X: Fixed near the list
+    // Use calc for precision if possible, but line attributes need values. 
+    // We'll use a safe percentage. 
+    const targetX = '82%';
+
+    // Target Y: Spread out vertically based on index
+    // Spread ~10-12% per item
+    const offset = (index - (total - 1) / 2) * 12;
+    const targetY = `${50 + offset}%`;
+
+    return { x1: centerX, y1: centerY, x2: targetX, y2: targetY };
   };
 
   return (
-    <div className="relative w-full h-screen bg-[#050505] text-white overflow-hidden selection:bg-purple-500/30">
+    <div className="relative w-full h-screen bg-[#050505] text-white overflow-hidden selection:bg-purple-500/30 font-sans">
 
       {/* Background Ambient Glow */}
       <div className="absolute top-[-20%] left-[-20%] w-[50%] h-[50%] bg-purple-900/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-20%] w-[50%] h-[50%] bg-blue-900/10 blur-[120px] rounded-full pointer-events-none" />
 
-      {/* SVG Tether Layer */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none z-0">
-        {currentNode.connections.map((conn) => {
-          const coords = getLineCoordinates(conn.position);
+      {/* SVG Tether Layer - Restored for Satellites */}
+      <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
+        {currentNode.connections.slice(0, 5).map((conn, index) => {
+          const coords = getLineCoordinates(index, Math.min(currentNode.connections.length, 5));
+          // Only show line if revealed? The user wants "faintly visible" or just "outline".
+          // User said "make sure the lines are there".
+          const isRevealed = index < revealedCount;
           return (
             <line
               key={conn.targetId}
@@ -55,20 +100,43 @@ export const LinkView: React.FC = () => {
               x2={coords.x2}
               y2={coords.y2}
               stroke="rgba(255,255,255,0.1)"
-              strokeWidth="2"
-              strokeDasharray="5,5"
-              className="animate-pulse"
+              strokeWidth={isRevealed ? "2" : "1"}
+              strokeDasharray={isRevealed ? "none" : "5,5"}
+              className={`transition-all duration-1000 ${isRevealed ? 'opacity-50' : 'opacity-20'}`}
             />
           );
         })}
       </svg>
 
       {/* Center Stage */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center w-full max-w-4xl">
         <LinkCard node={currentNode} />
 
+        {/* Timer Bar */}
+        <div className="w-[900px] max-w-[90vw] mt-6">
+          <TimerBar
+            key={currentLinkId} // Force re-mount on link change to reset timer state completely
+            duration={DURATION}
+            isRunning={true}
+            markers={markers}
+            onMarkerReached={() => {
+              setRevealedCount(prev => prev + 1);
+            }}
+            onComplete={() => {
+              // Auto-navigate to highest probability link
+              // Find highest prob
+              let bestId = connectionsWithData[0]?.targetId;
+              let maxP = -1;
+              Object.entries(probabilities).forEach(([id, p]) => {
+                if (p > maxP) { maxP = p; bestId = id; }
+              });
+              if (bestId) setCurrentLinkId(bestId);
+            }}
+          />
+        </div>
+
         {/* The Underground (Comments) */}
-        <div className="w-full mt-6 bg-neutral-900/80 backdrop-blur-md rounded-xl p-6 border border-white/5 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="w-[900px] max-w-[90vw] mt-6 bg-neutral-900/80 backdrop-blur-md rounded-xl p-6 border border-white/5 animate-in fade-in slide-in-from-bottom-4 duration-700">
           <div className="flex items-center gap-2 mb-4 text-neutral-400">
             <MessageSquare size={16} />
             <span className="text-sm font-medium uppercase tracking-wider">Discussion</span>
@@ -95,54 +163,46 @@ export const LinkView: React.FC = () => {
       </div>
 
       {/* The Left Wing (Rating) */}
-      <div className="absolute left-[calc(50%-550px)] top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 z-30">
-        <button className="p-3 rounded-full hover:bg-white/10 text-neutral-400 hover:text-green-400 transition-all hover:scale-110">
-          <ChevronUp size={32} />
+      <div className="absolute left-12 top-1/2 -translate-y-1/2 flex flex-col items-center gap-4 z-30">
+        <button
+          className="group relative p-3 rounded-full hover:bg-white/10 text-neutral-400 hover:text-green-400 transition-all hover:scale-110 active:scale-90 duration-200"
+          onClick={(e) => {
+            const btn = e.currentTarget;
+            btn.classList.add('animate-[spin_0.5s_ease-out]');
+            setTimeout(() => btn.classList.remove('animate-[spin_0.5s_ease-out]'), 500);
+          }}
+        >
+          <div className="absolute inset-0 rounded-full bg-green-500/20 scale-0 group-hover:scale-100 transition-transform duration-300" />
+          <ChevronUp size={32} className="relative z-10" />
         </button>
-        <div className="text-2xl font-bold font-mono tracking-tighter">
-          {currentNode.stats.upvotes - currentNode.stats.downvotes}
-        </div>
-        <button className="p-3 rounded-full hover:bg-white/10 text-neutral-400 hover:text-red-400 transition-all hover:scale-110">
-          <ChevronDown size={32} />
-        </button>
-      </div>
 
-      {/* The Right Wing (Taxonomy) */}
-      <div className="absolute right-[calc(50%-550px)] top-1/2 -translate-y-1/2 flex flex-col items-end gap-2 z-30">
-        {currentNode.tags.map(tag => (
-          <span key={tag} className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-neutral-300 hover:bg-white/10 hover:border-white/20 hover:scale-105 transition-all cursor-pointer">
-            #{tag}
+        <div className="text-2xl font-bold font-mono tracking-tighter tabular-nums">
+          <span className="animate-in slide-in-from-bottom duration-300 key={currentLinkId}">
+            {currentNode.stats.upvotes - currentNode.stats.downvotes}
           </span>
-        ))}
+        </div>
+
+        <button
+          className="group relative p-3 rounded-full hover:bg-white/10 text-neutral-400 hover:text-red-400 transition-all hover:scale-110 active:scale-90 duration-200"
+          onClick={(e) => {
+            const btn = e.currentTarget;
+            btn.classList.add('animate-[shake_0.5s_ease-out]'); // Standard shake or wiggle
+            // simplified shake manually via transform in keyframes or just scale
+          }}
+        >
+          <div className="absolute inset-0 rounded-full bg-red-500/20 scale-0 group-hover:scale-100 transition-transform duration-300" />
+          <ChevronDown size={32} className="relative z-10" />
+        </button>
       </div>
 
-      {/* The Constellation (Satellites) */}
-      {currentNode.connections.map(conn => {
-        const positionClasses = getPositionStyles(conn.position);
-        const targetNode = MOCK_NETWORK[conn.targetId];
-        if (!targetNode) return null;
+      {/* The Right Wing (Satellites) */}
+      <SatelliteList
+        connections={currentNode.connections}
+        revealedCount={revealedCount}
+        probabilities={probabilities}
+        onSelect={setCurrentLinkId}
+      />
 
-        return (
-          <div
-            key={conn.targetId}
-            className="absolute z-50 flex flex-col items-center gap-2 group cursor-pointer"
-            style={getPositionStyles(conn.position)}
-            onClick={() => setCurrentLinkId(conn.targetId)}
-          >
-            <div className="relative w-24 h-24 rounded-full border-2 border-white/10 group-hover:border-purple-500 transition-all duration-300 shadow-[0_0_15px_rgba(0,0,0,0.5)] group-hover:shadow-[0_0_25px_rgba(168,85,247,0.4)] overflow-hidden bg-black">
-              <img src={targetNode.screenshot_url} alt={targetNode.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
-              <div className="absolute inset-0 bg-black/40 group-hover:bg-transparent transition-colors" />
-            </div>
-
-            <div className="px-3 py-1 rounded-full bg-black/80 border border-white/10 backdrop-blur text-xs font-medium text-neutral-300 group-hover:text-white group-hover:border-purple-500/50 transition-all transform translate-y-0 group-hover:-translate-y-1 text-center whitespace-nowrap">
-              {conn.label}
-            </div>
-            <div className="text-xs text-neutral-500 opacity-0 group-hover:opacity-100 transition-opacity absolute top-full mt-2 w-32 text-center pointer-events-none bg-black/80 px-2 py-1 rounded">
-              {targetNode.title}
-            </div>
-          </div>
-        )
-      })}
     </div>
   );
 };

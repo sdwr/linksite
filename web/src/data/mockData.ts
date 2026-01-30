@@ -45,6 +45,8 @@ export const MOCK_NETWORK: Record<string, LinkNode> = {
       { targetId: 'link-b', label: 'Scientific Basis', position: 'top' },
       { targetId: 'link-c', label: 'Location Context', position: 'left' },
       { targetId: 'link-d', label: 'Tools', position: 'right' },
+      { targetId: 'link-e', label: 'Recipes', position: 'right' },
+      { targetId: 'link-f', label: 'Community', position: 'left' },
     ],
   },
   'link-b': {
@@ -90,6 +92,36 @@ export const MOCK_NETWORK: Record<string, LinkNode> = {
     ],
     connections: [
       { targetId: 'link-a', label: 'Usage', position: 'left' },
+    ],
+  },
+  'link-e': {
+    id: 'link-e',
+    title: 'Sourdough Recipes',
+    url: 'https://example.com/recipes',
+    screenshot_url: 'https://placehold.co/1920x1080/fff7ed/9a3412?text=Recipes',
+    description: 'Classic and modern variations of sourdough loaves.',
+    tags: ['Cooking', 'Recipes', 'Food'],
+    stats: { upvotes: 2100, downvotes: 30 },
+    comments: [
+      { user: 'Yummy', text: 'The jalapeño cheddar is a must-try.' },
+    ],
+    connections: [
+      { targetId: 'link-a', label: 'Base Technique', position: 'left' },
+    ],
+  },
+  'link-f': {
+    id: 'link-f',
+    title: 'Baking Community',
+    url: 'https://example.com/community',
+    screenshot_url: 'https://placehold.co/1920x1080/f0abfc/4a044e?text=Community',
+    description: 'Forums and groups for baking enthusiasts.',
+    tags: ['Social', 'Forums'],
+    stats: { upvotes: 750, downvotes: 120 },
+    comments: [
+      { user: 'NewUser', text: 'Very helpful people here.' },
+    ],
+    connections: [
+      { targetId: 'link-a', label: 'Topic', position: 'right' },
     ],
   },
 };

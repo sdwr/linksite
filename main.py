@@ -180,6 +180,7 @@ def _nav():
         <a href="/links">Links</a>
         <a href="/admin">Admin</a>
         <a href="/api/now">API Status</a>
+        <a href="/" style="margin-left:auto;background:#2563eb;color:#fff;padding:6px 16px;border-radius:6px;font-size:14px;">Frontend &#10132;</a>
     </nav>"""
 
 

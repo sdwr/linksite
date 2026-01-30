@@ -1,11 +1,16 @@
 #!/bin/bash
+# Stop backend
 if [ -f /tmp/linksite.pid ]; then
-    PID=$(cat /tmp/linksite.pid)
-    kill $PID 2>/dev/null
-    rm /tmp/linksite.pid
-    echo "Stopped (PID $PID)"
+    kill $(cat /tmp/linksite.pid) 2>/dev/null && echo "Backend stopped" || echo "Backend not running"
+    rm -f /tmp/linksite.pid
 else
-    # Try to find it anyway
-    pkill -f 'python3 main.py' 2>/dev/null
-    echo "Stopped (no PID file)"
+    echo "Backend stopped (no PID file)"
+fi
+
+# Stop frontend
+if [ -f /tmp/linksite-web.pid ]; then
+    kill $(cat /tmp/linksite-web.pid) 2>/dev/null && echo "Frontend stopped" || echo "Frontend not running"
+    rm -f /tmp/linksite-web.pid
+else
+    echo "Frontend stopped (no PID file)"
 fi

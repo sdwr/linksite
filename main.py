@@ -1,5 +1,5 @@
 """
-Feed Ingestion System + Director â€” FastAPI Application
+Feed Ingestion System + Director -- FastAPI Application
 """
 
 import os
@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, BackgroundTasks, Form, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from jinja2 import Template
 from supabase import create_client, Client
 from pydantic import BaseModel
 
@@ -32,11 +31,11 @@ supabase: Client = create_client(
 director = Director(supabase)
 
 
-# â”€â”€â”€ Lifespan (Director startup/shutdown) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Lifespan (Director startup/shutdown) ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Director does NOT auto-start â€” use /admin/director/start
+    # Director does NOT auto-start -- use /admin/director/start
     print("[App] Ready. Director is stopped (use /admin/director/start)")
     yield
     director.stop()
@@ -53,7 +52,7 @@ app.add_middleware(
 )
 
 
-# â”€â”€â”€ User Identity Middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- User Identity Middleware ---
 
 @app.middleware("http")
 async def user_identity_middleware(request: Request, call_next):
@@ -83,13 +82,106 @@ async def user_identity_middleware(request: Request, call_next):
     return response
 
 
-# â”€â”€â”€ Vote Model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Vote Model ---
 
 class VoteRequest(BaseModel):
     value: int  # 1 or -1
 
 
-# â”€â”€â”€ API: Voting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# HTML Helpers
+# ============================================================
+
+_CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: #f5f5f5; color: #222; line-height: 1.5; }
+a { color: #2563eb; text-decoration: none; }
+a:hover { text-decoration: underline; }
+nav { background: #1e293b; padding: 12px 24px; display: flex; gap: 24px; align-items: center; }
+nav a { color: #e2e8f0; font-weight: 600; font-size: 15px; }
+nav a:hover { color: #fff; text-decoration: none; }
+nav .brand { color: #38bdf8; font-size: 18px; font-weight: 700; margin-right: auto; }
+.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+.card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+.card h2 { margin-bottom: 12px; font-size: 18px; color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+.msg-ok { background: #dcfce7; color: #166534; padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; }
+.msg-err { background: #fee2e2; color: #991b1b; padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; padding: 8px 10px; background: #f8fafc; border-bottom: 2px solid #e2e8f0; font-weight: 600; color: #475569; font-size: 12px; text-transform: uppercase; }
+td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+tr:hover td { background: #f8fafc; }
+.truncate { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
+button, .btn { cursor: pointer; padding: 6px 14px; border-radius: 6px; border: 1px solid #d1d5db;
+               background: #fff; font-size: 13px; font-weight: 500; }
+button:hover, .btn:hover { background: #f1f5f9; }
+.btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+.btn-primary:hover { background: #1d4ed8; }
+.btn-danger { color: #dc2626; border-color: #fca5a5; }
+.btn-danger:hover { background: #fef2f2; }
+.btn-sm { padding: 3px 10px; font-size: 12px; }
+.inline-form { display: inline-block; margin: 0 4px; }
+input[type="text"], input[type="url"], input[type="number"], select {
+    padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+.status-running { color: #16a34a; font-weight: 700; }
+.status-stopped { color: #dc2626; font-weight: 700; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+.tag { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin: 2px; }
+.tag .del { color: #dc2626; margin-left: 4px; font-weight: 700; }
+.kv { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
+.kv .label { color: #64748b; }
+.feed-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #fafbfc; }
+.filter-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-bar a { padding: 4px 12px; border-radius: 14px; font-size: 13px; background: #e2e8f0; color: #334155; }
+.filter-bar a.active { background: #2563eb; color: #fff; }
+.log-entry { font-size: 13px; padding: 4px 0; border-bottom: 1px solid #f1f5f9; color: #475569; }
+"""
+
+def _nav():
+    return """<nav>
+        <span class="brand">Linksite</span>
+        <a href="/links">Links</a>
+        <a href="/admin">Admin</a>
+        <a href="/api/now">API Status</a>
+    </nav>"""
+
+
+def _page(title: str, body: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} - Linksite</title>
+<style>{_CSS}</style>
+</head>
+<body>
+{_nav()}
+<div class="container">
+{body}
+</div>
+</body>
+</html>"""
+
+
+def _messages(message: Optional[str], error: Optional[str] = None) -> str:
+    parts = []
+    if message:
+        parts.append(f'<div class="msg-ok">{_esc(message)}</div>')
+    if error:
+        parts.append(f'<div class="msg-err">{_esc(error)}</div>')
+    return "".join(parts)
+
+
+def _esc(s: str) -> str:
+    """Basic HTML escaping."""
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+# ============================================================
+# API: Voting
+# ============================================================
 
 @app.post("/api/links/{link_id}/vote")
 async def vote_on_link(link_id: int, vote: VoteRequest, request: Request):
@@ -138,7 +230,9 @@ async def get_link_votes(link_id: int, request: Request):
     }
 
 
-# â”€â”€â”€ API: /api/now â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# API: /api/now
+# ============================================================
 
 @app.get("/api/now")
 async def api_now(request: Request):
@@ -216,7 +310,9 @@ async def api_now(request: Request):
     }
 
 
-# â”€â”€â”€ API: Tags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# API: Tags
+# ============================================================
 
 @app.get("/api/tags/top")
 async def top_tags():
@@ -238,7 +334,9 @@ async def link_tags(link_id: int):
     return tags.data or []
 
 
-# â”€â”€â”€ Admin: Director Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# Admin: Director Controls
+# ============================================================
 
 @app.post("/admin/director/start")
 async def admin_director_start():
@@ -280,7 +378,9 @@ async def admin_director_status():
     }
 
 
-# â”€â”€â”€ Admin: Feed Tag Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# Admin: Feed Tag Management
+# ============================================================
 
 @app.post("/admin/feeds/{feed_id}/tags")
 async def admin_add_feed_tag(feed_id: int, tag: str = Form(...)):
@@ -314,7 +414,9 @@ async def admin_remove_feed_tag(feed_id: int, slug: str):
     return RedirectResponse(url=f"/admin?message=Tag removed", status_code=303)
 
 
-# â”€â”€â”€ Admin: Score Weights â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# Admin: Score Weights
+# ============================================================
 
 @app.get("/api/weights")
 async def get_weights():
@@ -330,7 +432,9 @@ async def update_weight(key: str, value: float = Form(...)):
     return RedirectResponse(url="/admin?message=Weight updated", status_code=303)
 
 
-# â”€â”€â”€ Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# Helper
+# ============================================================
 
 def _get_weight(key: str, default: float = 0.0) -> float:
     try:
@@ -342,8 +446,9 @@ def _get_weight(key: str, default: float = 0.0) -> float:
     return default
 
 
-# â”€â”€â”€ Existing Admin/Feed Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# (keeping the existing admin dashboard, feed management, sync routes)
+# ============================================================
+# HTML Pages
+# ============================================================
 
 import threading
 _active_syncs: dict = {}
@@ -356,18 +461,86 @@ async def root():
 
 
 @app.get("/links", response_class=HTMLResponse)
-async def view_links(message: Optional[str] = None):
+async def view_links(message: Optional[str] = None, feed_id: Optional[int] = None):
     try:
-        response = supabase.table('links').select('*').order('created_at', desc=True).limit(50).execute()
+        # Get all feeds for the filter bar
+        feeds_resp = supabase.table('feeds').select('id, url, type').order('id').execute()
+        feeds = feeds_resp.data or []
+
+        # Build feed name map
+        feed_map = {}
+        for f in feeds:
+            # Derive a short name from the URL
+            u = f.get("url", "")
+            name = u.split("/")[-1] or u.split("/")[-2] if "/" in u else u
+            if len(name) > 30:
+                name = name[:30] + "..."
+            feed_map[f["id"]] = {"name": name, "type": f.get("type", "?")}
+
+        # Fetch links (optionally filtered by feed)
+        query = supabase.table('links').select('id, url, title, direct_score, times_shown, feed_id, created_at').order('created_at', desc=True).limit(200)
+        if feed_id:
+            query = query.eq('feed_id', feed_id)
+        response = query.execute()
         links = response.data or []
-        stats = {'total': len(links)} if links else None
-        warning = "No links found." if not links else None
-        return HTMLResponse(f"<html><body><h1>Links ({len(links)})</h1>"
-            + f"<p><a href='/admin'>Admin</a> | <a href='/api/now'>API Now</a> | <a href='/admin/director/status'>Director Status</a></p>"
-            + "".join(f"<div><b>{l.get('title','?')}</b> â€” <a href='{l['url']}'>{l['url'][:80]}</a> (score: {l.get('direct_score',0)})</div>" for l in links)
-            + "</body></html>")
+
+        # --- Filter bar ---
+        filter_html = '<div class="filter-bar"><span style="font-size:13px;color:#64748b;">Filter:</span>'
+        active_all = ' active' if not feed_id else ''
+        filter_html += f'<a href="/links" class="{active_all}">All</a>'
+        for f in feeds:
+            active_cls = ' active' if feed_id == f["id"] else ''
+            fname = feed_map[f["id"]]["name"]
+            filter_html += f'<a href="/links?feed_id={f["id"]}" class="{active_cls}">{_esc(fname)}</a>'
+        filter_html += '</div>'
+
+        # --- Table ---
+        rows = ""
+        for l in links:
+            lid = l.get("id", "?")
+            title = _esc(l.get("title") or "(untitled)")
+            url = l.get("url", "")
+            url_display = _esc(url[:70] + ("..." if len(url) > 70 else ""))
+            fid = l.get("feed_id")
+            fname = _esc(feed_map.get(fid, {}).get("name", "-")) if fid else "-"
+            score = l.get("direct_score", 0) or 0
+            shown = l.get("times_shown", 0) or 0
+            score_cls = 'color:#16a34a' if score > 0 else ('color:#dc2626' if score < 0 else 'color:#94a3b8')
+            rows += f"""<tr>
+                <td><strong>{title}</strong><br><a href="{_esc(url)}" target="_blank" class="truncate">{url_display}</a></td>
+                <td>{fname}</td>
+                <td style="{score_cls};font-weight:600;text-align:center">{score}</td>
+                <td style="text-align:center">{shown}</td>
+                <td>
+                    <form method="POST" action="/links/delete/{lid}" class="inline-form"
+                          onsubmit="return confirm('Delete this link?')">
+                        <button class="btn-sm btn-danger" type="submit">&times;</button>
+                    </form>
+                </td>
+            </tr>"""
+
+        body = _messages(message)
+        body += f'<h1 style="margin-bottom:12px">Links ({len(links)})</h1>'
+        body += filter_html
+        body += f"""<div class="card" style="padding:0;overflow-x:auto">
+            <table>
+            <thead><tr>
+                <th>Title / URL</th>
+                <th>Feed</th>
+                <th style="text-align:center">Score</th>
+                <th style="text-align:center">Shown</th>
+                <th style="width:50px"></th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+            </table>
+        </div>"""
+
+        if not links:
+            body += '<p style="color:#94a3b8;text-align:center;padding:32px">No links found.</p>'
+
+        return HTMLResponse(_page("Links", body))
     except Exception as e:
-        return HTMLResponse(f"<h1>Error</h1><p>{e}</p>")
+        return HTMLResponse(_page("Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
 
 
 @app.post("/links/delete/{link_id}")
@@ -383,33 +556,129 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
         state = supabase.table("global_state").select("*").eq("id", 1).execute()
         gs = state.data[0] if state.data else {}
 
-        html = f"""<html><body>
-        <h1>Admin Dashboard</h1>
-        <p>{f'<b style="color:green">{message}</b>' if message else ''}</p>
-        <p>{f'<b style="color:red">{error}</b>' if error else ''}</p>
+        # Get current link details
+        current_link = None
+        current_link_id = gs.get("current_link_id")
+        if current_link_id:
+            cl_resp = supabase.table("links").select("id, title, url").eq("id", current_link_id).execute()
+            current_link = cl_resp.data[0] if cl_resp.data else None
 
-        <h2>Director</h2>
-        <p>Status: <b>{'ðŸŸ¢ Running' if director.running else 'ðŸ”´ Stopped'}</b></p>
-        <p>Current link: {gs.get('current_link_id', 'None')} | Reason: {gs.get('selection_reason', '-')}</p>
-        <form method="POST" action="/admin/director/start" style="display:inline"><button>â–¶ Start</button></form>
-        <form method="POST" action="/admin/director/stop" style="display:inline"><button>â¹ Stop</button></form>
-        <form method="POST" action="/admin/director/skip" style="display:inline"><button>â­ Skip</button></form>
-        <form method="POST" action="/admin/propagate" style="display:inline"><button>ðŸ“Š Propagate Scores</button></form>
+        # Time remaining
+        now = datetime.now(timezone.utc)
+        time_remaining = "-"
+        rotation_ends = gs.get("rotation_ends_at")
+        if rotation_ends:
+            try:
+                ends_at = datetime.fromisoformat(rotation_ends.replace("Z", "+00:00"))
+                secs = max(0, int((ends_at - now).total_seconds()))
+                time_remaining = f"{secs // 60}m {secs % 60}s" if secs > 0 else "Expired"
+            except Exception:
+                time_remaining = "?"
 
-        <h2>Feeds ({len(feeds)})</h2>
-        <form method="POST" action="/admin/add-feed">
-            <input name="url" placeholder="Feed URL" required>
-            <select name="type"><option value="youtube">YouTube</option><option value="rss">RSS</option>
-            <option value="reddit">Reddit</option><option value="bluesky">Bluesky</option>
-            <option value="website">Website</option></select>
-            <button>Add</button>
-        </form>
-        <form method="POST" action="/admin/sync"><button>ðŸ”„ Sync All</button></form>
-        """
+        # Satellites
+        satellites = gs.get("satellites") or []
+        sat_html = ""
+        if satellites:
+            for s in satellites:
+                revealed = "Yes" if s.get("revealed") else "No"
+                sat_title = _esc(s.get("title", "?")[:40])
+                sat_html += f'<div class="log-entry">[{_esc(s.get("position","?"))}] {sat_title} &mdash; revealed: {revealed}</div>'
+        else:
+            sat_html = '<span style="color:#94a3b8">None</span>'
+
+        # Recent log
+        log_resp = supabase.table("director_log").select("*").order("selected_at", desc=True).limit(8).execute()
+        log_entries = log_resp.data or []
+        log_html = ""
+        for entry in log_entries:
+            ts = (entry.get("selected_at") or "")[:19]
+            reason = _esc(entry.get("reason", "?"))
+            eid = entry.get("link_id", "?")
+            dur = entry.get("duration_seconds", "?")
+            log_html += f'<div class="log-entry">{ts} &mdash; link #{eid}, pool: {reason}, dur: {dur}s</div>'
+        if not log_html:
+            log_html = '<span style="color:#94a3b8">No entries yet</span>'
+
+        # Score weights
+        weights_resp = supabase.table("score_weights").select("*").execute()
+        weights = weights_resp.data or []
+        weights_html = ""
+        for w in weights:
+            wkey = _esc(w.get("key", "?"))
+            wval = w.get("value", 0)
+            weights_html += f"""<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #f1f5f9">
+                <span style="flex:1;font-size:13px;font-family:monospace">{wkey}</span>
+                <form method="POST" action="/api/weights/{wkey}" style="display:flex;gap:4px;align-items:center">
+                    <input type="number" name="value" value="{wval}" step="any" style="width:80px">
+                    <button class="btn-sm">Save</button>
+                </form>
+            </div>"""
+
+        # --- Director card ---
+        status_cls = "status-running" if director.running else "status-stopped"
+        status_text = "[RUNNING]" if director.running else "[STOPPED]"
+
+        current_info = "None"
+        if current_link:
+            ct = _esc(current_link.get("title", "?")[:60])
+            cu = _esc(current_link.get("url", "")[:80])
+            current_info = f'<strong>{ct}</strong><br><a href="{_esc(current_link.get("url",""))}" target="_blank" style="font-size:12px">{cu}</a>'
+
+        director_html = f"""<div class="card">
+            <h2>Director</h2>
+            <div class="kv"><span class="label">Status</span><span class="{status_cls}">{status_text}</span></div>
+            <div class="kv"><span class="label">Current Link</span><span>{current_info}</span></div>
+            <div class="kv"><span class="label">Selection Reason</span><span>{_esc(gs.get("selection_reason", "-"))}</span></div>
+            <div class="kv"><span class="label">Time Remaining</span><span>{time_remaining}</span></div>
+            <div class="kv"><span class="label">Started At</span><span>{_esc((gs.get("started_at") or "-")[:19])}</span></div>
+            <div class="kv"><span class="label">Rotation Ends</span><span>{_esc((rotation_ends or "-")[:19])}</span></div>
+            <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+                <form method="POST" action="/admin/director/start" class="inline-form"><button class="btn btn-primary btn-sm">&#9654; Start</button></form>
+                <form method="POST" action="/admin/director/stop" class="inline-form"><button class="btn btn-sm">&#9632; Stop</button></form>
+                <form method="POST" action="/admin/director/skip" class="inline-form"><button class="btn btn-sm">&#9193; Skip</button></form>
+                <form method="POST" action="/admin/propagate" class="inline-form"><button class="btn btn-sm">Propagate Scores</button></form>
+            </div>
+            <div style="margin-top:16px">
+                <strong style="font-size:13px;color:#475569">Satellites ({len(satellites)})</strong>
+                <div style="margin-top:4px">{sat_html}</div>
+            </div>
+            <div style="margin-top:16px">
+                <strong style="font-size:13px;color:#475569">Recent Log</strong>
+                <div style="margin-top:4px">{log_html}</div>
+            </div>
+        </div>"""
+
+        # --- Feeds card ---
+        feeds_html = f"""<div class="card">
+            <h2>Feeds ({len(feeds)})</h2>
+            <form method="POST" action="/admin/add-feed" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+                <input type="url" name="url" placeholder="Feed URL" required style="flex:1;min-width:200px">
+                <select name="type">
+                    <option value="youtube">YouTube</option>
+                    <option value="rss">RSS</option>
+                    <option value="reddit">Reddit</option>
+                    <option value="bluesky">Bluesky</option>
+                    <option value="website">Website</option>
+                </select>
+                <button class="btn btn-primary btn-sm">Add Feed</button>
+            </form>
+            <div style="margin-bottom:12px">
+                <form method="POST" action="/admin/sync" class="inline-form"><button class="btn btn-sm">Sync All</button></form>
+                <form method="POST" action="/admin/cancel-all" class="inline-form"><button class="btn btn-sm btn-danger">Cancel All</button></form>
+            </div>"""
 
         for f in feeds:
-            # Get feed tags
-            ft = supabase.table("feed_tags").select("tag_id").eq("feed_id", f["id"]).execute()
+            fid = f["id"]
+            furl = _esc(f.get("url", "?"))
+            ftype = _esc(f.get("type", "?"))
+            fstatus = _esc(f.get("status", "idle"))
+            fcount = f.get("link_count", 0) or 0
+            ftrust = f.get("trust_score", 1.0) or 1.0
+            ferror = f.get("last_error")
+            flast = (f.get("last_scraped_at") or "-")[:19]
+
+            # Feed tags
+            ft = supabase.table("feed_tags").select("tag_id").eq("feed_id", fid).execute()
             tag_ids = [t["tag_id"] for t in (ft.data or [])]
             feed_tag_names = []
             if tag_ids:
@@ -417,27 +686,61 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
                 feed_tag_names = tags.data or []
 
             tags_html = " ".join(
-                f'<span style="background:#eee;padding:2px 6px;border-radius:8px;font-size:12px">{t["name"]}'
-                f' <a href="/admin/feeds/{f["id"]}/tags/{t["slug"]}/delete" style="color:red">Ã—</a></span>'
+                f'<span class="tag">{_esc(t["name"])}'
+                f'<a href="/admin/feeds/{fid}/tags/{_esc(t["slug"])}/delete" class="del">&times;</a></span>'
                 for t in feed_tag_names
             )
 
-            html += f"""
-            <div style="border:1px solid #ddd;padding:10px;margin:5px 0">
-                <b>[{f['type']}]</b> {f['url']}
-                <br>Status: {f.get('status','idle')} | Links: {f.get('link_count',0)} | Trust: {f.get('trust_score',1.0):.2f}
-                <br>Tags: {tags_html}
-                <form method="POST" action="/admin/feeds/{f['id']}/tags" style="display:inline">
-                    <input name="tag" placeholder="Add tag" size="10"><button>+</button>
-                </form>
-                <form method="POST" action="/admin/sync-feed/{f['id']}" style="display:inline"><button>Sync</button></form>
-                <form method="POST" action="/admin/delete-feed/{f['id']}" style="display:inline"><button style="color:red">Delete</button></form>
+            status_color = "#16a34a" if fstatus == "idle" else ("#f59e0b" if fstatus == "syncing" else "#dc2626")
+            error_line = f'<div style="color:#dc2626;font-size:12px;margin-top:4px">Error: {_esc(ferror[:100])}</div>' if ferror else ""
+
+            feeds_html += f"""<div class="feed-box">
+                <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:6px">
+                    <div>
+                        <strong>[{ftype}]</strong> {furl}
+                        <div style="font-size:12px;color:#64748b;margin-top:2px">
+                            Status: <span style="color:{status_color};font-weight:600">{fstatus}</span>
+                            &middot; Links: <a href="/links?feed_id={fid}">{fcount}</a>
+                            &middot; Trust: {ftrust:.2f}
+                            &middot; Last sync: {_esc(flast)}
+                        </div>
+                        {error_line}
+                        <div style="margin-top:4px">{tags_html}
+                            <form method="POST" action="/admin/feeds/{fid}/tags" style="display:inline-flex;gap:4px;align-items:center">
+                                <input type="text" name="tag" placeholder="tag" style="width:80px">
+                                <button class="btn-sm">+</button>
+                            </form>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:4px">
+                        <form method="POST" action="/admin/sync-feed/{fid}" class="inline-form"><button class="btn-sm">Sync</button></form>
+                        <form method="POST" action="/admin/delete-feed/{fid}" class="inline-form"
+                              onsubmit="return confirm('Delete this feed and all its links?')">
+                            <button class="btn-sm btn-danger">Delete</button>
+                        </form>
+                    </div>
+                </div>
             </div>"""
 
-        html += "</body></html>"
-        return HTMLResponse(html)
+        feeds_html += "</div>"
+
+        # --- Weights card ---
+        weights_card = f"""<div class="card">
+            <h2>Score Weights</h2>
+            {weights_html if weights_html else '<span style="color:#94a3b8">No weights configured</span>'}
+        </div>"""
+
+        # --- Assemble ---
+        body = _messages(message, error)
+        body += director_html
+        body += '<div class="grid-2">'
+        body += feeds_html
+        body += weights_card
+        body += '</div>'
+
+        return HTMLResponse(_page("Admin", body))
     except Exception as e:
-        return HTMLResponse(f"<h1>Error</h1><p>{e}</p>")
+        return HTMLResponse(_page("Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
 
 
 @app.post("/admin/add-feed")
@@ -484,7 +787,9 @@ async def cancel_all_syncs():
     return RedirectResponse(url="/admin?message=Cancelled", status_code=303)
 
 
-# â”€â”€â”€ Sync Engine (unchanged from before) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# Sync Engine (unchanged)
+# ============================================================
 
 async def sync_feed_by_id(feed_id: int):
     try:
@@ -561,7 +866,9 @@ async def process_single_feed(feed: dict):
         _active_syncs.pop(feed_id, None)
 
 
-# â”€â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ============================================================
+# Main
+# ============================================================
 
 if __name__ == "__main__":
     import uvicorn

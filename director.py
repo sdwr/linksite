@@ -129,6 +129,17 @@ class Director:
             await self._rotate(now)
             return
 
+        # Calculate adjusted end time from BASE, not current_end (avoids accumulating bonus every tick)
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        base_duration = self.get_weight("rotation_default_sec", 120)
+        base_end = started + timedelta(seconds=base_duration)
+        adjusted = base_end + timedelta(seconds=bonus - penalty)
+
+        if adjusted != datetime.fromisoformat(state["current_end"].replace("Z", "+00:00")):
+            self.db.table("director_state").update({
+                "current_end": adjusted.isoformat()
+            }).eq("id", state["id"]).execute()
+
     # â”€â”€â”€ Rotation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     async def _rotate(self, now: datetime):

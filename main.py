@@ -67,8 +67,9 @@ director = Director(supabase, broadcast_fn=broadcast_event)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Director does NOT auto-start -- use /admin/director/start
-    print("[App] Ready. Director is stopped (use /admin/director/start)")
+    # Auto-start the director
+    director.start()
+    print("[App] Ready. Director auto-started.")
     yield
     director.stop()
 
@@ -320,6 +321,19 @@ async def get_stream_state() -> dict:
     }
 
 
+
+@app.get("/api/stream-test")
+async def test_stream():
+    """Minimal SSE test endpoint."""
+    async def gen():
+        import json, time as _t
+        for i in range(10):
+            payload = {"type": "state", "test": True, "i": i, "time": _t.time()}
+            yield f"event: state\ndata: {json.dumps(payload)}\n\n"
+            await asyncio.sleep(2)
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
 @app.get("/api/stream")
 async def event_stream():
     """Server-Sent Events endpoint. Pushes state every 2s or immediate events."""
@@ -331,13 +345,28 @@ async def event_stream():
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=2.0)
-                    yield f"data: {json.dumps(event)}\n\n"
+                    event_type = event.get("type", "action")
+                    yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     # Heartbeat: send full state
-                    state = await get_stream_state()
-                    yield f"data: {json.dumps(state)}\n\n"
+                    try:
+                        state = await get_stream_state()
+                        yield f"event: state\ndata: {json.dumps(state)}\n\n"
+                    except Exception as e:
+                        print(f"[SSE] Error in get_stream_state: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                except Exception as e:
+                    print(f"[SSE] Error in event handler: {e}")
+                    import traceback
+                    traceback.print_exc()
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            print(f"[SSE] Generator crashed: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             connected_clients.discard(queue)
 

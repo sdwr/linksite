@@ -28,126 +28,89 @@ export const RealProvider: React.FC<RealProviderProps> = ({ children }) => {
   // linkage: we might just use functional updates, but for complex patches ref is handy.
   // Actually, functional updates are safer.
 
+  // Transform backend snake_case to frontend camelCase
+  const transformState = useCallback((data: any) => {
+    return {
+      featured: data.featured ? {
+        link: {
+          ...data.featured.link,
+          id: String(data.featured.link.id),
+        },
+        timeRemaining: data.featured.time_remaining_sec ?? data.featured.timeRemaining ?? 120,
+        totalDuration: data.featured.total_duration_sec ?? data.featured.totalDuration ?? 120,
+        reason: data.featured.reason ?? 'unknown',
+      } : undefined,
+      satellites: (data.satellites || []).map((s: any) => ({
+        ...s,
+        id: String(s.id),
+        targetId: String(s.id),
+      })),
+      recentActions: (data.recent_actions || data.recentActions || []).map((a: any) => ({
+        ...a,
+        link_id: String(a.link_id),
+      })),
+      viewerCount: data.viewer_count ?? data.viewerCount ?? 0,
+    };
+  }, []);
+
+  // Poll /api/now as primary data source (SSE through reverse proxies is unreliable)
   useEffect(() => {
-    let evtSource: EventSource | null = null;
-    let reconnectTimer: NodeJS.Timeout;
+    let active = true;
+    let pollTimer: NodeJS.Timeout;
 
-    const connect = () => {
-      // In dev mode, Next.js rewrites /api to the FastAPI backend (usually port 8000)
-      // Ensure 'next.config.js' or setup proxy is configured. 
-      // Assuming relative path works via Next.js proxy.
-      const url = '/api/stream';
-      console.log('Connecting to SSE:', url);
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/now');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!active) return;
 
-      evtSource = new EventSource(url);
+        // Transform /api/now format to match our state shape
+        const featured = data.link ? {
+          link: {
+            id: String(data.link.id),
+            title: data.link.title || '',
+            url: data.link.url || '',
+            feed_name: data.link.meta_json?.feed_title || '',
+          },
+          timeRemaining: data.timers?.seconds_remaining ?? 120,
+          totalDuration: 120,
+          reason: data.selection_reason || 'unknown',
+        } : state.featured;
 
-      evtSource.onopen = () => {
-        console.log('SSE Connected');
+        const satellites = (data.satellites || []).map((s: any) => ({
+          id: String(s.link_id),
+          title: s.title || '',
+          url: s.url || '',
+          position: s.position || '',
+          label: s.label || '',
+          revealed: s.revealed ?? false,
+          nominations: s.nominations ?? 0,
+          targetId: String(s.link_id),
+        }));
+
+        setState({
+          featured,
+          satellites,
+          recentActions: state.recentActions,
+          viewerCount: data.viewer_count ?? 0,
+        });
         setIsConnected(true);
-      };
-
-      evtSource.onerror = (err) => {
-        console.error('SSE Error:', err);
+      } catch (err) {
+        console.error('Poll error:', err);
         setIsConnected(false);
-        evtSource?.close();
-        // Retry logic
-        reconnectTimer = setTimeout(connect, 3000);
-      };
+      }
 
-      // --- Event Handlers ---
-
-      evtSource.addEventListener('state', (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          // Assuming data matches LinkSiteState structure roughly
-          // We might need to validate or transform based on backend DTOs vs frontend types
-          setState(data);
-        } catch (err) {
-          console.error('Error parsing state event:', err);
-        }
-      });
-
-      evtSource.addEventListener('react', (e) => {
-        try {
-          const action = JSON.parse(e.data) as ActionEvent; // has LinkId, Value, UserId...
-
-          setState(prev => {
-            // 1. Update Time if applies to current link
-            let newTime = prev.featured.timeRemaining;
-            if (action.link_id === prev.featured.link.id && action.value) {
-              // Backend logic mirrors this: +10s / -5s (or whatever contract says)
-              // We replicate it for immediate feedback consistency if we didn't receive a 'state' update yet
-              const delta = action.value === 1 ? 10 : -5;
-              newTime = Math.max(0, newTime + delta);
-            }
-
-            return {
-              ...prev,
-              featured: {
-                ...prev.featured,
-                timeRemaining: newTime
-              },
-              recentActions: [action, ...prev.recentActions].slice(0, 50)
-            };
-          });
-        } catch (err) {
-          console.error('Error parsing react event:', err);
-        }
-      });
-
-      evtSource.addEventListener('nominate', (e) => {
-        try {
-          const action = JSON.parse(e.data) as ActionEvent;
-
-          setState(prev => {
-            // Update satellite counts
-            const newSatellites = prev.satellites.map(s => {
-              if (s.id === action.link_id) {
-                return { ...s, nominations: (s.nominations || 0) + 1 };
-              }
-              return s;
-            });
-
-            return {
-              ...prev,
-              satellites: newSatellites,
-              recentActions: [action, ...prev.recentActions].slice(0, 50)
-            };
-          });
-        } catch (err) {
-          console.error('Error parsing nominate event:', err);
-        }
-      });
-
-      evtSource.addEventListener('rotation', (e) => {
-        try {
-          // Backend sends: { new_link: LinkNode, reason: string }
-          const data = JSON.parse(e.data);
-          const newLink = data.new_link as LinkNode;
-          const reason = data.reason;
-
-          setState(prev => ({
-            ...prev,
-            featured: {
-              ...prev.featured,
-              link: newLink,
-              timeRemaining: prev.featured.totalDuration, // Reset timer? Or does backend send duration?
-              // Ideally we verify if backend sends duration in rotation event or we just default.
-              // Assuming reset to default for now or wait for state update.
-              reason: reason
-            }
-          }));
-        } catch (err) {
-          console.error('Error parsing rotation event:', err);
-        }
-      });
+      if (active) {
+        pollTimer = setTimeout(poll, 2000);
+      }
     };
 
-    connect();
+    poll();
 
     return () => {
-      evtSource?.close();
-      clearTimeout(reconnectTimer);
+      active = false;
+      clearTimeout(pollTimer);
     };
   }, []);
 

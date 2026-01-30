@@ -74,17 +74,10 @@ export const LinkView: React.FC = () => {
   };
 
   // Calculate markers for when to reveal satellites
-  // Distribute them evenly over the range 33% -> 85%
+  // Reveal all at 75%
   const markers = useMemo(() => {
-    if (SATELLITE_COUNT === 0) return [];
-    const start = 33;
-    const end = 85;
-    const step = (end - start) / Math.max(1, SATELLITE_COUNT);
-
-    return Array.from({ length: SATELLITE_COUNT }).map((_, i) => {
-      return start + (step * i);
-    });
-  }, [SATELLITE_COUNT]);
+    return [75];
+  }, []);
 
   useEffect(() => {
     setRevealedCount(0);
@@ -190,7 +183,7 @@ export const LinkView: React.FC = () => {
                   markers={markers}
                   adjustment={timeAdjustment}
                   onMarkerReached={() => {
-                    setRevealedCount(prev => prev + 1);
+                    setRevealedCount(SATELLITE_COUNT);
                   }}
                   onComplete={() => {
                     // Navigate to highest probability (voted)

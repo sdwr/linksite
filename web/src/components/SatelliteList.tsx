@@ -54,10 +54,12 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
             className={`
                 pointer-events-auto
                 transform transition-all duration-500 ease-out
+                rounded-xl
                 ${isTarget && transitionPhase === 'PRE' ? 'animate-pulse-glow z-50 scale-105 border-yellow-500 shadow-yellow-500/50' : ''}
                 ${isTarget && transitionPhase === 'RUNNING' ? 'animate-fly-to-center !opacity-100 !z-50 border-yellow-500 shadow-yellow-500/50' : ''}
                 ${isOther && transitionPhase !== 'IDLE' ? 'opacity-0 scale-90 blur-sm pointer-events-none transition-opacity duration-300' : ''}
-                ${!transitionTargetId && (isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-40 scale-95')}
+                ${!transitionTargetId && (isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-0 scale-95')}
+                active:scale-95 active:border-purple-500 transition-transform
               `}
             style={
               {

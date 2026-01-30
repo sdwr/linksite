@@ -1,6 +1,6 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
-import { LinkNode } from '@/data/mockData';
+import { LinkNode } from '@/types';
 
 interface LinkCardProps {
   node: LinkNode;

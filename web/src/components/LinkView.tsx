@@ -1,110 +1,91 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { ChevronUp, ChevronDown, MessageSquare, Send } from 'lucide-react';
-import { MOCK_NETWORK, LinkNode, Connection } from '@/data/mockData';
+import { MessageSquare, Send } from 'lucide-react';
 import { LinkCard } from './LinkCard';
 import { TimerBar } from './TimerBar';
 import { SatelliteList } from './SatelliteList';
+import { useLinkSite } from '@/contexts/LinkSiteContext';
+import { LinkSiteState } from '@/types';
 
 export const LinkView: React.FC = () => {
-  const [currentLinkId, setCurrentLinkId] = useState<string>('link-a');
-  const currentNode = MOCK_NETWORK[currentLinkId];
+  const { state: providerState, react, nominate } = useLinkSite();
 
-  if (!currentNode) return <div className="text-white">Node not found</div>;
+  // Buffered state to allow for transition animations while provider updates immediately
+  const [viewState, setViewState] = useState<LinkSiteState>(providerState);
 
-  // Determine probabilities based on upvotes + local session votes
-  // We need to track local votes
-  const [localVotes, setLocalVotes] = useState<Record<string, number>>({});
-
-  const connectionsWithData = useMemo(() => {
-    return currentNode.connections.map(conn => {
-      const node = MOCK_NETWORK[conn.targetId];
-      return { ...conn, node };
-    }).filter(c => c.node);
-  }, [currentNode]);
-
-  const probabilities = useMemo(() => {
-    if (connectionsWithData.length === 0) return {};
-
-    // Calculate total including local session votes
-    // Base score = upvotes. Local vote adds distinct weight (e.g. +500)
-    const getScore = (id: string, base: number) => base + (localVotes[id] || 0) * 500;
-
-    const totalScore = connectionsWithData.reduce((sum, c) => sum + getScore(c.targetId, c.node?.stats.upvotes || 0), 0);
-    const probs: Record<string, number> = {};
-
-    connectionsWithData.forEach(c => {
-      const score = getScore(c.targetId, c.node?.stats.upvotes || 0);
-      if (totalScore === 0) probs[c.targetId] = 1 / connectionsWithData.length;
-      else probs[c.targetId] = score / totalScore;
-    });
-
-    return probs;
-  }, [connectionsWithData, localVotes]);
-
-  // Timer & Reveal Logic
+  // Animation States
   const [revealedCount, setRevealedCount] = useState(0);
-  const [timeAdjustment, setTimeAdjustment] = useState<{ id: number, amountMs: number } | undefined>(undefined);
   const [transitionTargetId, setTransitionTargetId] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [transitionPhase, setTransitionPhase] = useState<'IDLE' | 'PRE' | 'RUNNING'>('IDLE');
+  const [timeAdjustment, setTimeAdjustment] = useState<{ id: number, amountMs: number } | undefined>(undefined);
 
-  const DURATION = 10000; // 10 seconds per link
-  const SATELLITE_COUNT = Math.min(connectionsWithData.length, 5);
+  const currentNode = viewState.featured.link;
+  const DURATION = viewState.featured.totalDuration * 1000; // Seconds to MS
+  const SATELLITE_COUNT = viewState.satellites.length;
 
-  const transitionTo = (nextId: string) => {
+  // Sync with Provider, handling Transitions
+  useEffect(() => {
+    // If the provider has rotated to a new link...
+    if (providerState.featured.link.id !== viewState.featured.link.id) {
+      // Identify which satellite is the new target (so we can glow it)
+      // We look for the new ID in the *current* viewState's satellites
+      const targetId = providerState.featured.link.id;
+      const isSatellite = viewState.satellites.find(s => s.id === targetId);
+
+      if (isSatellite) {
+        handleTransitionSequence(targetId, providerState);
+      } else {
+        // Hard swap if not found (e.g. initial load mismatch or wildcard)
+        setViewState(providerState);
+      }
+    } else {
+      // Regular update (Timer tick, votes, comments) - sync immediately if not transitioning
+      if (!isTransitioning) {
+        setViewState(providerState);
+      }
+    }
+  }, [providerState, viewState.featured.link.id, isTransitioning]);
+
+  const handleTransitionSequence = (targetId: string, nextState: LinkSiteState) => {
     if (isTransitioning) return;
     setIsTransitioning(true);
-    setTransitionTargetId(nextId);
+    setTransitionTargetId(targetId);
     setTransitionPhase('PRE');
 
-    // 1. Pre-transition (Glow phase) - 0.8s
+    // 1. Pre-transition (Glow phase)
     setTimeout(() => {
       setTransitionPhase('RUNNING');
 
-      // 2. Running Phase (Animation) - 1.2s
+      // 2. Running Phase (Animation)
       setTimeout(() => {
-        setCurrentLinkId(nextId);
+        // Swap Data
+        setViewState(nextState);
         setTransitionTargetId(null);
         setTransitionPhase('IDLE');
         setIsTransitioning(false);
+        // Reset reveal for new state
+        setRevealedCount(0);
       }, 1300);
     }, 800);
   };
 
-  // Calculate markers for when to reveal satellites
-  // Reveal all at 75%
-  const markers = useMemo(() => {
-    return [75];
-  }, []);
-
-  useEffect(() => {
-    setRevealedCount(0);
-    setLocalVotes({});
-    setTransitionPhase('IDLE');
-  }, [currentLinkId]);
-
-  const handleVote = (targetId: string) => {
-    setLocalVotes(prev => ({
-      ...prev,
-      [targetId]: (prev[targetId] || 0) + 1
-    }));
-  };
+  // Calculate markers (Reveal all at 75%)
+  const markers = useMemo(() => [75], []);
 
   const handleAdjustTime = (amountMs: number) => {
+    // Optimistic Update
     setTimeAdjustment({ id: Date.now(), amountMs });
-    // If adding time, we don't automatically hide satellites (keep them revealed)
-    // If removing time, markers might be crossed in the TimerBar logic
+
+    // amountMs > 0 is "Add Time" (Upvote/Like -> 1)
+    // amountMs < 0 is "Remove Time" (Downvote/Dislike -> -1)
+    // Backend expects 1 or -1
+    const val = amountMs > 0 ? 1 : -1;
+    react(currentNode.id, val);
   };
 
-  // Background Lines
-  // Calculate specific positions for the vertical list on the right
-  // The list is centered vertically.
-  // We want lines to go from center (50%, 50%) to the left edge of each list item.
-  // List is at right-12 (48px) + w-80 (320px). Left edge is ~right-368px.
-  // In screen width % (assuming 1920px), 370px is ~20%. So target X is 80%.
-
+  // Background Lines Logic
   const getLineCoordinates = (index: number, total: number) => {
     const centerX = '50%';
     const centerY = '50%';
@@ -121,19 +102,17 @@ export const LinkView: React.FC = () => {
       <div className="absolute top-[-20%] left-[-20%] w-[50%] h-[50%] bg-purple-900/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-20%] w-[50%] h-[50%] bg-blue-900/10 blur-[120px] rounded-full pointer-events-none" />
 
-      {/* Transition Wrapper / Container */}
-      <div
-        className="absolute inset-0 w-full h-full"
-      >
-        {/* SVG Tether Layer - Restored for Satellites */}
-        {/* Hide lines during transition to clean up view */}
+      {/* Transition Wrapper */}
+      <div className="absolute inset-0 w-full h-full">
+
+        {/* SVG Tether Layer */}
         <svg className={`absolute inset-0 w-full h-full pointer-events-none z-10 transition-opacity duration-500 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
-          {currentNode.connections.slice(0, 5).map((conn, index) => {
-            const coords = getLineCoordinates(index, Math.min(currentNode.connections.length, 5));
+          {viewState.satellites.slice(0, 5).map((conn, index) => {
+            const coords = getLineCoordinates(index, Math.min(SATELLITE_COUNT, 5));
             const isRevealed = index < revealedCount;
             return (
               <line
-                key={conn.targetId}
+                key={conn.id} // SatelliteNode has id
                 x1={coords.x1}
                 y1={coords.y1}
                 x2={coords.x2}
@@ -150,26 +129,16 @@ export const LinkView: React.FC = () => {
         {/* Center Stage */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center w-full max-w-4xl">
           <div
-            key={currentLinkId}
+            key={currentNode.id}
             className={`w-full flex flex-col items-center transition-all duration-500 ${transitionPhase === 'RUNNING' ? 'animate-slide-out-left' : ''} ${!isTransitioning ? 'animate-fade-in' : ''}`}
           >
             <LinkCard node={currentNode} />
 
             {/* Timer Bar + Controls */}
             <div className={`w-[900px] max-w-[90vw] mt-6 flex items-center gap-4 transition-opacity duration-300 ${transitionPhase !== 'IDLE' ? 'opacity-50 blur-sm pointer-events-none' : ''}`}>
-              {/* Reject / Subtract Time */}
+              {/* Reject / Subtract Time (-3s or -1 vote) */}
               <button
-                // Wait, logic in TimerBar: offset += amount.
-                // effectiveElapsed = real - offset.
-                // remaining = duration - effective.
-                // If we want to REDUCE bar (jump forward), we need to INCREASE effective elapsed.
-                // So we should DECREASE offset (if offset is "added time").
-                // Current logic: offset += amount.
-                // effective = real - offset.
-                // So +amount DECREASES effective elapsed => ADDS TIME.
-                // -amount INCREASES effective elapsed => REMOVES TIME.
-                // "X reduces the bar" => remove time => pass negative.
-                onClick={() => handleAdjustTime(-3000)} // Remove 3s (30%)
+                onClick={() => handleAdjustTime(-3000)}
                 className="p-3 rounded-full bg-neutral-900 border border-white/10 hover:border-red-500/50 hover:bg-neutral-800 text-neutral-400 hover:text-red-500 transition-all group"
               >
                 <span className="font-bold text-xl group-active:scale-90 transition-transform block">✕</span>
@@ -177,43 +146,45 @@ export const LinkView: React.FC = () => {
 
               <div className="flex-1">
                 <TimerBar
-                  key={currentLinkId}
+                  key={currentNode.id}
                   duration={DURATION}
+                  // We override internal timer logic with provider timeRemaining for sync
+                  // But TimerBar logic might expect to drive itself. 
+                  // Ideally TimerBar should accept 'timeRemaining' prop if we want it stateless.
+                  // For now, let's let it run but maybe faster?
+                  // Actually, let's keep it running assuming MockProvider syncs roughly 1s.
+                  // Or better: update TimerBar to accept 'currentTime' instead of internal state?
+                  // Let's pass 'isRunning={!isTransitioning}' and rely on remount (key change).
                   isRunning={!isTransitioning}
-                  markers={markers}
                   adjustment={timeAdjustment}
+                  timeRemaining={viewState.featured.timeRemaining * 1000}
+                  markers={markers}
                   onMarkerReached={() => {
                     setRevealedCount(SATELLITE_COUNT);
                   }}
                   onComplete={() => {
-                    // Navigate to highest probability (voted)
-                    let bestId = connectionsWithData[0]?.targetId;
-                    let maxP = -1;
-                    Object.entries(probabilities).forEach(([id, p]) => {
-                      if (p > maxP) { maxP = p; bestId = id; }
-                    });
-                    if (bestId) transitionTo(bestId);
+                    // Do nothing. Provider handles rotation.
                   }}
                 />
               </div>
 
-              {/* Approve / Add Time */}
+              {/* Approve / Add Time (+10s or +1 vote) */}
               <button
-                onClick={() => handleAdjustTime(10000)} // Add 10s
+                onClick={() => handleAdjustTime(10000)}
                 className="p-3 rounded-full bg-neutral-900 border border-white/10 hover:border-green-500/50 hover:bg-neutral-800 text-neutral-400 hover:text-green-500 transition-all group"
               >
                 <div className="font-bold text-xl group-active:scale-90 transition-transform block">✓</div>
               </button>
             </div>
 
-            {/* The Underground (Comments) */}
+            {/* Comments */}
             <div className={`w-[900px] max-w-[90vw] mt-6 bg-neutral-900/80 backdrop-blur-md rounded-xl p-6 border border-white/5 transition-all duration-300 ${transitionPhase !== 'IDLE' ? 'opacity-50 blur-sm pointer-events-none' : ''}`}>
               <div className="flex items-center gap-2 mb-4 text-neutral-400">
                 <MessageSquare size={16} />
                 <span className="text-sm font-medium uppercase tracking-wider">Discussion</span>
               </div>
               <div className="space-y-3 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
-                {currentNode.comments.map((comment, idx) => (
+                {currentNode.comments?.map((comment, idx) => (
                   <div key={idx} className="text-sm group">
                     <span className="font-bold text-purple-400 mr-2">{comment.user}</span>
                     <span className="text-neutral-300 group-hover:text-white transition-colors">{comment.text}</span>
@@ -234,12 +205,18 @@ export const LinkView: React.FC = () => {
           </div>
         </div>
 
-        {/* The Right Wing (Satellites) */}
+        {/* Satellites */}
         <SatelliteList
-          connections={currentNode.connections}
+          connections={viewState.satellites} // SatelliteNode[] fits here? Need check SatelliteList props
           revealedCount={revealedCount}
-          probabilities={probabilities}
-          onSelect={handleVote}
+          // probabilities can be derived from satellite nominations
+          probabilities={
+            viewState.satellites.reduce((acc, sat) => {
+              acc[sat.id] = (sat.nominations || 0) / 10; // Mock prob
+              return acc;
+            }, {} as Record<string, number>)
+          }
+          onSelect={(id) => nominate(id)}
           transitionTargetId={transitionTargetId}
           transitionPhase={transitionPhase}
         />

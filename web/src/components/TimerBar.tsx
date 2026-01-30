@@ -7,6 +7,7 @@ interface TimerBarProps {
   markers?: number[]; // percentages (0-100) where events should trigger
   isRunning?: boolean;
   adjustment?: { id: number; amountMs: number }; // Signal to adjust time
+  timeRemaining?: number; // Authoritative time remaining in MS
 }
 
 export const TimerBar: React.FC<TimerBarProps> = ({
@@ -15,7 +16,8 @@ export const TimerBar: React.FC<TimerBarProps> = ({
   onMarkerReached,
   markers = [],
   isRunning = true,
-  adjustment
+  adjustment,
+  timeRemaining
 }) => {
   const [progress, setProgress] = useState(100);
 
@@ -24,6 +26,8 @@ export const TimerBar: React.FC<TimerBarProps> = ({
   // So we track an offset.
   const offsetRef = React.useRef(0);
   const adjustmentIdRef = React.useRef<number | undefined>(undefined);
+  // Track last synced time to avoid loops if needed, though simple diff is fine
+  const lastTimeRemainingRef = React.useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (adjustment && adjustment.id !== adjustmentIdRef.current) {
@@ -31,6 +35,28 @@ export const TimerBar: React.FC<TimerBarProps> = ({
       adjustmentIdRef.current = adjustment.id;
     }
   }, [adjustment]);
+
+  // Sync with authoritative time
+  useEffect(() => {
+    if (timeRemaining !== undefined && timeRemaining !== lastTimeRemainingRef.current) {
+      // Calculate what the elapsed SHOULD be
+      const impliedElapsed = duration - timeRemaining;
+      // Our loop uses: realElapsed - offset = effectiveElapsed
+      // So: realElapsed - offset = impliedElapsed
+      // offset = realElapsed - impliedElapsed
+      // We need 'startTime' to know realElapsed.
+      // But startTime is local to the effect below.
+      // We can't access it here easily unless we ref it.
+      // Alternative: Just set a "syncNeeded" flag or value ref that the loop consumes?
+      // Or simpler: The loop uses Date.now(). We can reset startTime or offset in the loop.
+
+      // Let's store the target effective elapsed in a ref
+      syncTargetRef.current = impliedElapsed;
+      lastTimeRemainingRef.current = timeRemaining;
+    }
+  }, [timeRemaining, duration]);
+
+  const syncTargetRef = React.useRef<number | undefined>(undefined);
 
   // Store callbacks in refs to avoid re-running effect when they change
   const onMarkerReachedRef = React.useRef(onMarkerReached);
@@ -51,6 +77,7 @@ export const TimerBar: React.FC<TimerBarProps> = ({
     prevProgressRef.current = 100;
     offsetRef.current = 0;
     setProgress(100);
+    syncTargetRef.current = undefined;
   }, [duration, markers]);
 
   useEffect(() => {
@@ -67,10 +94,14 @@ export const TimerBar: React.FC<TimerBarProps> = ({
 
       const realElapsed = Date.now() - startTime;
 
+      // Sync if needed
+      if (syncTargetRef.current !== undefined) {
+        // calculated offset so that: realElapsed - offset = syncTarget
+        offsetRef.current = realElapsed - syncTargetRef.current;
+        syncTargetRef.current = undefined; // Consume it
+      }
+
       // Cap the offset to ensure we don't have "negative" elapsed time (meaning > 100% time left)
-      // effectiveElapsed = real - offset.
-      // If effectiveElapsed < 0, it means we have > 100% remaining.
-      // We want effectiveElapsed >= 0.
       if (realElapsed - offsetRef.current < 0) {
         offsetRef.current = realElapsed;
       }

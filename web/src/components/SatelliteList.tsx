@@ -1,8 +1,8 @@
 import React from 'react';
-import { Connection } from '@/data/mockData';
+import { SatelliteNode } from '@/types';
 
 interface SatelliteListProps {
-  connections: Connection[];
+  connections: SatelliteNode[];
   revealedCount: number;
   onSelect: (targetId: string) => void;
   probabilities?: Record<string, number>; // id -> 0-1 probability
@@ -58,7 +58,7 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
                 ${isTarget && transitionPhase === 'PRE' ? 'animate-pulse-glow z-50 scale-105 border-yellow-500 shadow-yellow-500/50' : ''}
                 ${isTarget && transitionPhase === 'RUNNING' ? 'animate-fly-to-center !opacity-100 !z-50 border-yellow-500 shadow-yellow-500/50' : ''}
                 ${isOther && transitionPhase !== 'IDLE' ? 'opacity-0 scale-90 blur-sm pointer-events-none transition-opacity duration-300' : ''}
-                ${!transitionTargetId && (isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-0 scale-95')}
+                ${!transitionTargetId && (isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-40 scale-95')}
                 active:scale-95 active:border-purple-500 transition-transform
               `}
             style={
@@ -97,14 +97,8 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
                   <span className={`text-xs font-mono tracking-wider uppercase mb-0.5 transition-colors ${isRevealed && probability > 0.3 ? 'text-purple-300' : 'text-neutral-500'}`}>
                     {conn.label}
                   </span>
-                  {/* We generally want the TITLE here, but Connection only has label. 
-                            Ideally, we want to look up the node title. 
-                            For now, we'll use label as primary or passed in props. 
-                            Wait, the design usually shows the NEXT node's title.
-                            The Connection object needs to be enriched or we need to look it up.
-                        */}
                   <span className={`font-medium text-sm line-clamp-1 ${isRevealed ? 'text-white' : 'text-neutral-500'}`}>
-                    Link {conn.targetId.split('-')[1].toUpperCase()}
+                    {conn.title}
                   </span>
                 </div>
                 {/* Probability Indicator - invisible/dimmed if not revealed */}

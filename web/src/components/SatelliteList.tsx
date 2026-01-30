@@ -39,7 +39,15 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
                 ${isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-8 opacity-60 scale-95'}
               `}
             style={{ transitionDelay: `${index * 100}ms` }}
-            onClick={() => isRevealed && onSelect(conn.targetId)}
+            onClick={(e) => {
+              if (isRevealed) {
+                onSelect(conn.targetId);
+                // Add quick pulse animation or splash
+                const el = e.currentTarget;
+                el.classList.add('scale-110', 'brightness-125');
+                setTimeout(() => el.classList.remove('scale-110', 'brightness-125'), 200);
+              }
+            }}
           >
             <div
               className={`

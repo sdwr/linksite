@@ -6,13 +6,15 @@ interface SatelliteListProps {
   revealedCount: number;
   onSelect: (targetId: string) => void;
   probabilities?: Record<string, number>; // id -> 0-1 probability
+  transitionTargetId?: string | null;
 }
 
 export const SatelliteList: React.FC<SatelliteListProps> = ({
   connections,
   revealedCount,
   onSelect,
-  probabilities = {}
+  probabilities = {},
+  transitionTargetId
 }) => {
   // Take only up to 5 connections
   const satellites = connections.slice(0, 5);
@@ -29,6 +31,8 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
 
         // Show outline if not revealed
         // Show full content if revealed
+        const isTarget = transitionTargetId === conn.targetId;
+        const isOther = transitionTargetId && !isTarget;
 
         return (
           <div
@@ -36,11 +40,13 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
             className={`
                 pointer-events-auto
                 transform transition-all duration-500 ease-out
-                ${isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-8 opacity-60 scale-95'}
+                ${isTarget ? 'animate-fly-to-center !opacity-100 !z-50' : ''}
+                ${isOther ? 'opacity-0 scale-90 blur-sm pointer-events-none transition-opacity duration-300' : ''}
+                ${!transitionTargetId && (isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-40 scale-95')}
               `}
-            style={{ transitionDelay: `${index * 100}ms` }}
+            style={{ transitionDelay: isTarget ? '0ms' : `${index * 100}ms` }}
             onClick={(e) => {
-              if (isRevealed) {
+              if (isRevealed && !transitionTargetId) {
                 onSelect(conn.targetId);
                 // Add quick pulse animation or splash
                 const el = e.currentTarget;

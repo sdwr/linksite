@@ -46,6 +46,7 @@ export const LinkView: React.FC = () => {
   // Timer & Reveal Logic
   const [revealedCount, setRevealedCount] = useState(0);
   const [timeAdjustment, setTimeAdjustment] = useState<{ id: number, amountMs: number } | undefined>(undefined);
+  const [transitionTargetId, setTransitionTargetId] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
   const DURATION = 10000; // 10 seconds per link
@@ -54,16 +55,17 @@ export const LinkView: React.FC = () => {
   const transitionTo = (nextId: string) => {
     if (isTransitioning) return;
     setIsTransitioning(true);
+    setTransitionTargetId(nextId);
 
-    // Wait for exit animation
+    // Wait for exit animation (0.8s in css)
     setTimeout(() => {
       setCurrentLinkId(nextId);
-      // Wait for enter animation (optional, or just reset immediately if render handles it)
-      // We'll keep it simple: change ID, then unset transitioning after short delay
+      setTransitionTargetId(null);
+      // New content fade in
       setTimeout(() => {
         setIsTransitioning(false);
       }, 100);
-    }, 500); // 500ms exit
+    }, 800);
   };
 
   // Calculate markers for when to reveal satellites
@@ -120,9 +122,9 @@ export const LinkView: React.FC = () => {
       <div className="absolute top-[-20%] left-[-20%] w-[50%] h-[50%] bg-purple-900/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-20%] w-[50%] h-[50%] bg-blue-900/10 blur-[120px] rounded-full pointer-events-none" />
 
-      {/* Transition Wrapper */}
+      {/* Transition Wrapper / Container */}
       <div
-        className={`absolute inset-0 w-full h-full transition-all duration-500 ease-in-out ${isTransitioning ? 'opacity-0 scale-95 blur-sm pointer-events-none' : 'opacity-100 scale-100 blur-0'}`}
+        className="absolute inset-0 w-full h-full"
       >
         {/* SVG Tether Layer - Restored for Satellites */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 transition-opacity duration-500">
@@ -147,7 +149,9 @@ export const LinkView: React.FC = () => {
 
         {/* Center Stage */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center w-full max-w-4xl">
-          <LinkCard node={currentNode} />
+          <div className={`w-full transition-all duration-500 ${isTransitioning ? 'animate-slide-out-left' : 'animate-in fade-in zoom-in duration-500'}`}>
+            <LinkCard node={currentNode} />
+          </div>
 
           {/* Timer Bar + Controls */}
           <div className="w-[900px] max-w-[90vw] mt-6 flex items-center gap-4">
@@ -173,7 +177,7 @@ export const LinkView: React.FC = () => {
               <TimerBar
                 key={currentLinkId}
                 duration={DURATION}
-                isRunning={true}
+                isRunning={!isTransitioning}
                 markers={markers}
                 adjustment={timeAdjustment}
                 onMarkerReached={() => {
@@ -233,6 +237,7 @@ export const LinkView: React.FC = () => {
           revealedCount={revealedCount}
           probabilities={probabilities}
           onSelect={handleVote}
+          transitionTargetId={transitionTargetId}
         />
       </div>
     </div>

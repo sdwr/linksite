@@ -546,9 +546,14 @@ class Director:
                 feed_links = self.db.table("links").select(
                     "direct_score"
                 ).eq("feed_id", fid).execute()
-                scores = [l["direct_score"] for l in (feed_links.data or []) if l.get("direct_score")]
+                scores = [l["direct_score"] for l in (feed_links.data or []) if l.get("direct_score") is not None]
                 avg = sum(scores) / len(scores) if scores else 0
-                trust = 0.5 + 0.5 * (2 / (1 + math.exp(-avg)) - 1)  # sigmoid-ish, centered at 1.0
+                # Trust stays 1.0 (neutral) when no votes exist; only shifts with actual interactions
+                if not scores:
+                    trust = 1.0
+                else:
+                    # sigmoid centered at 1.0: range [0.5, 1.5], neutral at avg=0
+                    trust = 0.5 + 1.0 / (1 + math.exp(-avg))
                 self.db.table("feeds").update({
                     "avg_link_score": avg,
                     "trust_score": trust,

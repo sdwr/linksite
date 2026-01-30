@@ -48,6 +48,7 @@ export const LinkView: React.FC = () => {
   const [timeAdjustment, setTimeAdjustment] = useState<{ id: number, amountMs: number } | undefined>(undefined);
   const [transitionTargetId, setTransitionTargetId] = useState<string | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [transitionPhase, setTransitionPhase] = useState<'IDLE' | 'PRE' | 'RUNNING'>('IDLE');
 
   const DURATION = 10000; // 10 seconds per link
   const SATELLITE_COUNT = Math.min(connectionsWithData.length, 5);
@@ -56,15 +57,19 @@ export const LinkView: React.FC = () => {
     if (isTransitioning) return;
     setIsTransitioning(true);
     setTransitionTargetId(nextId);
+    setTransitionPhase('PRE');
 
-    // Wait for exit animation (0.8s in css)
+    // 1. Pre-transition (Glow phase) - 0.8s
     setTimeout(() => {
-      setCurrentLinkId(nextId);
-      setTransitionTargetId(null);
-      // New content fade in
+      setTransitionPhase('RUNNING');
+
+      // 2. Running Phase (Animation) - 1.2s
       setTimeout(() => {
+        setCurrentLinkId(nextId);
+        setTransitionTargetId(null);
+        setTransitionPhase('IDLE');
         setIsTransitioning(false);
-      }, 100);
+      }, 1300);
     }, 800);
   };
 
@@ -84,6 +89,7 @@ export const LinkView: React.FC = () => {
   useEffect(() => {
     setRevealedCount(0);
     setLocalVotes({});
+    setTransitionPhase('IDLE');
   }, [currentLinkId]);
 
   const handleVote = (targetId: string) => {
@@ -127,7 +133,8 @@ export const LinkView: React.FC = () => {
         className="absolute inset-0 w-full h-full"
       >
         {/* SVG Tether Layer - Restored for Satellites */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none z-10 transition-opacity duration-500">
+        {/* Hide lines during transition to clean up view */}
+        <svg className={`absolute inset-0 w-full h-full pointer-events-none z-10 transition-opacity duration-500 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
           {currentNode.connections.slice(0, 5).map((conn, index) => {
             const coords = getLineCoordinates(index, Math.min(currentNode.connections.length, 5));
             const isRevealed = index < revealedCount;
@@ -149,84 +156,87 @@ export const LinkView: React.FC = () => {
 
         {/* Center Stage */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center w-full max-w-4xl">
-          <div className={`w-full transition-all duration-500 ${isTransitioning ? 'animate-slide-out-left' : 'animate-in fade-in zoom-in duration-500'}`}>
+          <div
+            key={currentLinkId}
+            className={`w-full flex flex-col items-center transition-all duration-500 ${transitionPhase === 'RUNNING' ? 'animate-slide-out-left' : ''} ${!isTransitioning ? 'animate-fade-in' : ''}`}
+          >
             <LinkCard node={currentNode} />
-          </div>
 
-          {/* Timer Bar + Controls */}
-          <div className="w-[900px] max-w-[90vw] mt-6 flex items-center gap-4">
-            {/* Reject / Subtract Time */}
-            <button
-              // Wait, logic in TimerBar: offset += amount.
-              // effectiveElapsed = real - offset.
-              // remaining = duration - effective.
-              // If we want to REDUCE bar (jump forward), we need to INCREASE effective elapsed.
-              // So we should DECREASE offset (if offset is "added time").
-              // Current logic: offset += amount.
-              // effective = real - offset.
-              // So +amount DECREASES effective elapsed => ADDS TIME.
-              // -amount INCREASES effective elapsed => REMOVES TIME.
-              // "X reduces the bar" => remove time => pass negative.
-              onClick={() => handleAdjustTime(-3000)} // Remove 3s (30%)
-              className="p-3 rounded-full bg-neutral-900 border border-white/10 hover:border-red-500/50 hover:bg-neutral-800 text-neutral-400 hover:text-red-500 transition-all group"
-            >
-              <span className="font-bold text-xl group-active:scale-90 transition-transform block">✕</span>
-            </button>
-
-            <div className="flex-1">
-              <TimerBar
-                key={currentLinkId}
-                duration={DURATION}
-                isRunning={!isTransitioning}
-                markers={markers}
-                adjustment={timeAdjustment}
-                onMarkerReached={() => {
-                  setRevealedCount(prev => prev + 1);
-                }}
-                onComplete={() => {
-                  // Navigate to highest probability (voted)
-                  let bestId = connectionsWithData[0]?.targetId;
-                  let maxP = -1;
-                  Object.entries(probabilities).forEach(([id, p]) => {
-                    if (p > maxP) { maxP = p; bestId = id; }
-                  });
-                  if (bestId) transitionTo(bestId);
-                }}
-              />
-            </div>
-
-            {/* Approve / Add Time */}
-            <button
-              onClick={() => handleAdjustTime(10000)} // Add 10s
-              className="p-3 rounded-full bg-neutral-900 border border-white/10 hover:border-green-500/50 hover:bg-neutral-800 text-neutral-400 hover:text-green-500 transition-all group"
-            >
-              <div className="font-bold text-xl group-active:scale-90 transition-transform block">✓</div>
-            </button>
-          </div>
-
-          {/* The Underground (Comments) */}
-          <div className="w-[900px] max-w-[90vw] mt-6 bg-neutral-900/80 backdrop-blur-md rounded-xl p-6 border border-white/5 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="flex items-center gap-2 mb-4 text-neutral-400">
-              <MessageSquare size={16} />
-              <span className="text-sm font-medium uppercase tracking-wider">Discussion</span>
-            </div>
-            <div className="space-y-3 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
-              {currentNode.comments.map((comment, idx) => (
-                <div key={idx} className="text-sm group">
-                  <span className="font-bold text-purple-400 mr-2">{comment.user}</span>
-                  <span className="text-neutral-300 group-hover:text-white transition-colors">{comment.text}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 flex gap-2">
-              <input
-                type="text"
-                placeholder="Add a comment..."
-                className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-purple-500/50 transition-colors"
-              />
-              <button className="p-2 bg-white text-black rounded-lg hover:bg-neutral-200 transition-colors">
-                <Send size={16} />
+            {/* Timer Bar + Controls */}
+            <div className={`w-[900px] max-w-[90vw] mt-6 flex items-center gap-4 transition-opacity duration-300 ${transitionPhase !== 'IDLE' ? 'opacity-50 blur-sm pointer-events-none' : ''}`}>
+              {/* Reject / Subtract Time */}
+              <button
+                // Wait, logic in TimerBar: offset += amount.
+                // effectiveElapsed = real - offset.
+                // remaining = duration - effective.
+                // If we want to REDUCE bar (jump forward), we need to INCREASE effective elapsed.
+                // So we should DECREASE offset (if offset is "added time").
+                // Current logic: offset += amount.
+                // effective = real - offset.
+                // So +amount DECREASES effective elapsed => ADDS TIME.
+                // -amount INCREASES effective elapsed => REMOVES TIME.
+                // "X reduces the bar" => remove time => pass negative.
+                onClick={() => handleAdjustTime(-3000)} // Remove 3s (30%)
+                className="p-3 rounded-full bg-neutral-900 border border-white/10 hover:border-red-500/50 hover:bg-neutral-800 text-neutral-400 hover:text-red-500 transition-all group"
+              >
+                <span className="font-bold text-xl group-active:scale-90 transition-transform block">✕</span>
               </button>
+
+              <div className="flex-1">
+                <TimerBar
+                  key={currentLinkId}
+                  duration={DURATION}
+                  isRunning={!isTransitioning}
+                  markers={markers}
+                  adjustment={timeAdjustment}
+                  onMarkerReached={() => {
+                    setRevealedCount(prev => prev + 1);
+                  }}
+                  onComplete={() => {
+                    // Navigate to highest probability (voted)
+                    let bestId = connectionsWithData[0]?.targetId;
+                    let maxP = -1;
+                    Object.entries(probabilities).forEach(([id, p]) => {
+                      if (p > maxP) { maxP = p; bestId = id; }
+                    });
+                    if (bestId) transitionTo(bestId);
+                  }}
+                />
+              </div>
+
+              {/* Approve / Add Time */}
+              <button
+                onClick={() => handleAdjustTime(10000)} // Add 10s
+                className="p-3 rounded-full bg-neutral-900 border border-white/10 hover:border-green-500/50 hover:bg-neutral-800 text-neutral-400 hover:text-green-500 transition-all group"
+              >
+                <div className="font-bold text-xl group-active:scale-90 transition-transform block">✓</div>
+              </button>
+            </div>
+
+            {/* The Underground (Comments) */}
+            <div className={`w-[900px] max-w-[90vw] mt-6 bg-neutral-900/80 backdrop-blur-md rounded-xl p-6 border border-white/5 transition-all duration-300 ${transitionPhase !== 'IDLE' ? 'opacity-50 blur-sm pointer-events-none' : ''}`}>
+              <div className="flex items-center gap-2 mb-4 text-neutral-400">
+                <MessageSquare size={16} />
+                <span className="text-sm font-medium uppercase tracking-wider">Discussion</span>
+              </div>
+              <div className="space-y-3 max-h-[150px] overflow-y-auto pr-2 custom-scrollbar">
+                {currentNode.comments.map((comment, idx) => (
+                  <div key={idx} className="text-sm group">
+                    <span className="font-bold text-purple-400 mr-2">{comment.user}</span>
+                    <span className="text-neutral-300 group-hover:text-white transition-colors">{comment.text}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a comment..."
+                  className="flex-1 bg-black/50 border border-white/10 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-purple-500/50 transition-colors"
+                />
+                <button className="p-2 bg-white text-black rounded-lg hover:bg-neutral-200 transition-colors">
+                  <Send size={16} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -238,6 +248,7 @@ export const LinkView: React.FC = () => {
           probabilities={probabilities}
           onSelect={handleVote}
           transitionTargetId={transitionTargetId}
+          transitionPhase={transitionPhase}
         />
       </div>
     </div>

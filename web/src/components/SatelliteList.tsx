@@ -7,6 +7,7 @@ interface SatelliteListProps {
   onSelect: (targetId: string) => void;
   probabilities?: Record<string, number>; // id -> 0-1 probability
   transitionTargetId?: string | null;
+  transitionPhase?: 'IDLE' | 'PRE' | 'RUNNING';
 }
 
 export const SatelliteList: React.FC<SatelliteListProps> = ({
@@ -14,10 +15,16 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
   revealedCount,
   onSelect,
   probabilities = {},
-  transitionTargetId
+  transitionTargetId,
+  transitionPhase = 'IDLE'
 }) => {
   // Take only up to 5 connections
   const satellites = connections.slice(0, 5);
+  const totalSatellites = satellites.length;
+  // Calculate middle index for centering logic based on list height
+  // List items are approx 80px + 24px gap = 104px.
+  // Center of list is roughly (total - 1) / 2.
+
 
   return (
     <div className="absolute right-12 top-1/2 -translate-y-1/2 flex flex-col gap-6 z-40 w-80 pointer-events-none">
@@ -34,17 +41,31 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
         const isTarget = transitionTargetId === conn.targetId;
         const isOther = transitionTargetId && !isTarget;
 
+        // Calculate vertical offset to center
+        // If this item is at index i, and we want it to move to Center Screen Y.
+        // Current Y relative to List Center is: (index - (total-1)/2) * 104px.
+        // So we need to translate BY -(Current Y).
+        const offsetIndex = index - (totalSatellites - 1) / 2;
+        const flyY = offsetIndex * 104 * -1; // Invert to move to center
+
         return (
           <div
             key={conn.targetId}
             className={`
                 pointer-events-auto
                 transform transition-all duration-500 ease-out
-                ${isTarget ? 'animate-fly-to-center !opacity-100 !z-50' : ''}
-                ${isOther ? 'opacity-0 scale-90 blur-sm pointer-events-none transition-opacity duration-300' : ''}
+                ${isTarget && transitionPhase === 'PRE' ? 'animate-pulse-glow z-50 scale-105 border-yellow-500 shadow-yellow-500/50' : ''}
+                ${isTarget && transitionPhase === 'RUNNING' ? 'animate-fly-to-center !opacity-100 !z-50 border-yellow-500 shadow-yellow-500/50' : ''}
+                ${isOther && transitionPhase !== 'IDLE' ? 'opacity-0 scale-90 blur-sm pointer-events-none transition-opacity duration-300' : ''}
                 ${!transitionTargetId && (isRevealed ? 'translate-x-0 opacity-100 scale-100' : 'translate-x-4 opacity-40 scale-95')}
               `}
-            style={{ transitionDelay: isTarget ? '0ms' : `${index * 100}ms` }}
+            style={
+              {
+                transitionDelay: isTarget ? '0ms' : `${index * 100}ms`,
+                '--fly-y': `${flyY}px`,
+                animationDelay: isTarget && transitionPhase === 'RUNNING' ? '200ms' : '0ms'
+              } as React.CSSProperties
+            }
             onClick={(e) => {
               if (isRevealed && !transitionTargetId) {
                 onSelect(conn.targetId);

@@ -78,7 +78,9 @@ export const TimerBar: React.FC<TimerBarProps> = ({
     offsetRef.current = 0;
     setProgress(100);
     syncTargetRef.current = undefined;
-  }, [duration, markers]);
+    setProgress(100);
+    syncTargetRef.current = undefined;
+  }, [duration, JSON.stringify(markers)]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -132,7 +134,8 @@ export const TimerBar: React.FC<TimerBarProps> = ({
     }, interval);
 
     return () => clearInterval(timer);
-  }, [duration, isRunning, markers]); // Removed callbacks from dependencies
+    return () => clearInterval(timer);
+  }, [duration, isRunning, JSON.stringify(markers)]); // Serialize markers to avoid ref change issues
 
   return (
     <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden relative mt-4">

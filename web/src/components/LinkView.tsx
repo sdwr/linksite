@@ -8,7 +8,7 @@ import { SatelliteList } from './SatelliteList';
 import { useLinkSite } from '@/contexts/LinkSiteContext';
 import { LinkSiteState } from '@/types';
 
-export const LinkView: React.FC = () => {
+const LinkViewComponent: React.FC = () => {
   const { state: providerState, react, nominate } = useLinkSite();
 
   // Buffered state to allow for transition animations while provider updates immediately
@@ -39,6 +39,8 @@ export const LinkView: React.FC = () => {
       } else {
         // Hard swap if not found (e.g. initial load mismatch or wildcard)
         setViewState(providerState);
+        // Immediate reveal on hard swap
+        setTimeout(() => setRevealedCount(providerState.satellites.length), 300);
       }
     } else {
       // Regular update (Timer tick, votes, comments) - sync immediately if not transitioning
@@ -47,6 +49,13 @@ export const LinkView: React.FC = () => {
       }
     }
   }, [providerState, viewState.featured.link.id, isTransitioning]);
+
+  // Initial Reveal
+  useEffect(() => {
+    if (revealedCount === 0 && !isTransitioning) {
+      setTimeout(() => setRevealedCount(SATELLITE_COUNT), 300);
+    }
+  }, []);
 
   const handleTransitionSequence = (targetId: string, nextState: LinkSiteState) => {
     if (isTransitioning) return;
@@ -65,14 +74,12 @@ export const LinkView: React.FC = () => {
         setTransitionTargetId(null);
         setTransitionPhase('IDLE');
         setIsTransitioning(false);
-        // Reset reveal for new state
-        setRevealedCount(0);
+        // Reset reveal for new state - Immediate Reveal!
+        setRevealedCount(0); // Reset briefly
+        setTimeout(() => setRevealedCount(nextState.satellites.length), 100);
       }, 1300);
     }, 800);
   };
-
-  // Calculate markers (Reveal all at 75%)
-  const markers = useMemo(() => [75], []);
 
   const handleAdjustTime = (amountMs: number) => {
     // Optimistic Update
@@ -94,6 +101,17 @@ export const LinkView: React.FC = () => {
     const targetY = `${50 + offset}%`;
     return { x1: centerX, y1: centerY, x2: targetX, y2: targetY };
   };
+
+  // Probability Calculation
+  const totalNominations = viewState.satellites.reduce((acc, s) => acc + (s.nominations || 0), 0);
+  const probabilities = viewState.satellites.reduce((acc, sat) => {
+    if (totalNominations === 0) {
+      acc[sat.id] = 1 / SATELLITE_COUNT;
+    } else {
+      acc[sat.id] = (sat.nominations || 0) / totalNominations;
+    }
+    return acc;
+  }, {} as Record<string, number>);
 
   return (
     <div className="relative w-full h-screen bg-[#050505] text-white overflow-hidden selection:bg-purple-500/30 font-sans">
@@ -148,20 +166,9 @@ export const LinkView: React.FC = () => {
                 <TimerBar
                   key={currentNode.id}
                   duration={DURATION}
-                  // We override internal timer logic with provider timeRemaining for sync
-                  // But TimerBar logic might expect to drive itself. 
-                  // Ideally TimerBar should accept 'timeRemaining' prop if we want it stateless.
-                  // For now, let's let it run but maybe faster?
-                  // Actually, let's keep it running assuming MockProvider syncs roughly 1s.
-                  // Or better: update TimerBar to accept 'currentTime' instead of internal state?
-                  // Let's pass 'isRunning={!isTransitioning}' and rely on remount (key change).
                   isRunning={!isTransitioning}
                   adjustment={timeAdjustment}
                   timeRemaining={viewState.featured.timeRemaining * 1000}
-                  markers={markers}
-                  onMarkerReached={() => {
-                    setRevealedCount(SATELLITE_COUNT);
-                  }}
                   onComplete={() => {
                     // Do nothing. Provider handles rotation.
                   }}
@@ -207,15 +214,9 @@ export const LinkView: React.FC = () => {
 
         {/* Satellites */}
         <SatelliteList
-          connections={viewState.satellites} // SatelliteNode[] fits here? Need check SatelliteList props
+          connections={viewState.satellites}
           revealedCount={revealedCount}
-          // probabilities can be derived from satellite nominations
-          probabilities={
-            viewState.satellites.reduce((acc, sat) => {
-              acc[sat.id] = (sat.nominations || 0) / 10; // Mock prob
-              return acc;
-            }, {} as Record<string, number>)
-          }
+          probabilities={probabilities}
           onSelect={(id) => nominate(id)}
           transitionTargetId={transitionTargetId}
           transitionPhase={transitionPhase}
@@ -224,3 +225,5 @@ export const LinkView: React.FC = () => {
     </div>
   );
 };
+
+export const LinkView = React.memo(LinkViewComponent);

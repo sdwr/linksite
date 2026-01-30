@@ -22,6 +22,7 @@ export interface LinkNode {
   url: string;
   screenshot_url: string;
   description: string;
+  feed_name?: string;
   tags: string[];
   stats: LinkStats;
   comments: Comment[];
@@ -51,52 +52,53 @@ export const MOCK_NETWORK: Record<string, LinkNode> = {
   },
   'link-b': {
     id: 'link-b',
-    title: 'Fermentation Science',
-    url: 'https://example.com/fermentation',
-    screenshot_url: 'https://placehold.co/1920x1080/dbeafe/1e3a8a?text=Fermentation+Science',
-    description: 'Understanding the microbial processes behind fermentation.',
-    tags: ['Science', 'Chemistry', 'Biology'],
+    title: 'Sourdough Starter Science',
+    url: 'https://www.youtube.com/watch?v=2FVfJtgpXnU',
+    screenshot_url: 'https://img.youtube.com/vi/2FVfJtgpXnU/maxresdefault.jpg',
+    description: 'A deep dive into the microbiology of your starter.',
+    tags: ['Science', 'Video', 'Education'],
     stats: { upvotes: 890, downvotes: 12 },
     comments: [
-      { user: 'ScienceGuy', text: 'Fascinating details on lactobacillus.' },
+      { user: 'ScienceGuy', text: 'This visual explanation is perfect.' },
     ],
     connections: [
-      { targetId: 'link-a', label: 'Application', position: 'left' },
+      { targetId: 'link-a', label: 'Back to History', position: 'left' },
     ],
+    feed_name: 'BreadTube',
   },
   'link-c': {
     id: 'link-c',
-    title: 'San Francisco Travel',
-    url: 'https://example.com/sf-travel',
-    screenshot_url: 'https://placehold.co/1920x1080/ffedd5/9a3412?text=SF+Travel',
-    description: 'A guide to the best spots in San Francisco.',
-    tags: ['Travel', 'USA', 'City Guide'],
+    title: 'My first loaf! thoughts?',
+    url: 'https://www.reddit.com/r/Sourdough/comments/123456/my_first_loaf',
+    screenshot_url: 'https://preview.redd.it/fake-image.jpg?auto=webp&s=123',
+    description: 'u/Baker123',
+    tags: ['Community', 'Feedback'],
     stats: { upvotes: 3400, downvotes: 120 },
-    comments: [
-      { user: 'Traveler99', text: 'Love the Golden Gate section.' },
-    ],
+    comments: [], // Using downvotes as comment count in mock for now
     connections: [
-      { targetId: 'link-a', label: 'Famous Food', position: 'right' },
+      { targetId: 'link-a', label: 'Inspiration', position: 'right' },
     ],
+    feed_name: 'r/Sourdough',
   },
   'link-d': {
     id: 'link-d',
-    title: 'Best Bread Knives',
-    url: 'https://example.com/knives',
-    screenshot_url: 'https://placehold.co/1920x1080/f1f5f9/475569?text=Bread+Knives',
-    description: 'Top rated knives for cutting crusty bread.',
-    tags: ['Reviews', 'Kitchen Tools', 'Shopping'],
+    title: 'Just had the best tartine in SF 🍞✨',
+    url: 'https://bsky.app/profile/sourdough.fan/post/123456',
+    screenshot_url: '', // Optional for Bsky
+    description: 'The crust on this thing is unbelievable. #sourdough #sf',
+    tags: ['Social', 'Microblog'],
     stats: { upvotes: 450, downvotes: 5 },
     comments: [
-      { user: 'ChefCurry', text: 'The serration on #3 is perfect.' },
+      { user: 'follower', text: 'Looks amazing!' },
     ],
     connections: [
-      { targetId: 'link-a', label: 'Usage', position: 'left' },
+      { targetId: 'link-a', label: 'Context', position: 'left' },
     ],
+    feed_name: 'Sourdough Fan',
   },
   'link-e': {
     id: 'link-e',
-    title: 'Sourdough Recipes',
+    title: 'Sourdough Recipes Collection',
     url: 'https://example.com/recipes',
     screenshot_url: 'https://placehold.co/1920x1080/fff7ed/9a3412?text=Recipes',
     description: 'Classic and modern variations of sourdough loaves.',
@@ -108,6 +110,7 @@ export const MOCK_NETWORK: Record<string, LinkNode> = {
     connections: [
       { targetId: 'link-a', label: 'Base Technique', position: 'left' },
     ],
+    feed_name: 'FoodBlog',
   },
   'link-f': {
     id: 'link-f',

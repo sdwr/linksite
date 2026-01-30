@@ -63,7 +63,7 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
               `}
             style={
               {
-                transitionDelay: isTarget ? '0ms' : `${index * 100}ms`,
+                transitionDelay: isTarget ? '0ms' : `${index * 150}ms`, // Slower stagger
                 '--fly-y': `${flyY}px`,
                 animationDelay: isTarget && transitionPhase === 'RUNNING' ? '200ms' : '0ms'
               } as React.CSSProperties
@@ -92,24 +92,33 @@ export const SatelliteList: React.FC<SatelliteListProps> = ({
                 <div className={`absolute inset-0 bg-gradient-to-r ${isRevealed && probability > 0.3 ? 'from-purple-500/20 via-blue-500/20 to-purple-500/20 animate-gradient-x' : 'from-transparent via-blue-500/10 to-transparent'}`} />
               </div>
 
-              <div className={`flex items-center justify-between gap-4 relative z-10 w-full transition-opacity duration-500 ${isRevealed ? 'opacity-100' : 'opacity-0'}`}>
-                <div className="flex flex-col">
-                  <span className={`text-xs font-mono tracking-wider uppercase mb-0.5 transition-colors ${isRevealed && probability > 0.3 ? 'text-purple-300' : 'text-neutral-500'}`}>
-                    {conn.label}
-                  </span>
-                  <span className={`font-medium text-sm line-clamp-1 ${isRevealed ? 'text-white' : 'text-neutral-500'}`}>
-                    {conn.title}
+              <div className={`flex flex-col gap-2 relative z-10 w-full transition-opacity duration-500 ${isRevealed ? 'opacity-100' : 'opacity-0'}`}>
+
+                {/* Title Row */}
+                <div className="flex justify-between items-start gap-2">
+                  <div className="flex flex-col">
+                    <span className={`text-xs font-mono tracking-wider uppercase mb-0.5 transition-colors ${isRevealed && probability > 0.3 ? 'text-purple-300' : 'text-neutral-500'}`}>
+                      {conn.label}
+                    </span>
+                    <span className={`font-medium text-sm line-clamp-1 ${isRevealed ? 'text-white' : 'text-neutral-500'}`}>
+                      {conn.title}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Horizontal Probability Bar */}
+                <div className="w-full flex items-center gap-3 mt-1">
+                  <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-700 ease-out"
+                      style={{ width: `${Math.round(probability * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs font-mono font-bold text-white/50 w-8 text-right">
+                    {Math.round(probability * 100)}%
                   </span>
                 </div>
-                {/* Probability Indicator - invisible/dimmed if not revealed */}
-                <div
-                  className={`w-1.5 h-8 rounded-full bg-white/5 overflow-hidden transition-opacity ${isRevealed ? 'opacity-100' : 'opacity-20'}`}
-                >
-                  <div
-                    className={`w-full rounded-full transition-all duration-1000 ${isRevealed && probability > 0.3 ? 'bg-gradient-to-t from-blue-500 via-purple-500 to-pink-500 animate-pulse' : 'bg-neutral-600'}`}
-                    style={{ height: `${Math.max(15, probability * 100)}%`, marginTop: 'auto' }}
-                  />
-                </div>
+
               </div>
             </div>
           </div>

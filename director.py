@@ -1,26 +1,28 @@
 """
-The Director â€” async brain that selects which link to show.
+The Director -- async brain that selects which link to show.
 
 Runs as an asyncio task inside the FastAPI process.
 Handles: link selection, satellite generation, timer adjustment, score propagation.
+Now also: nomination-aware rotation and event broadcasting.
 """
 
 import asyncio
 import random
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Callable
 from supabase import Client
 
 
 class Director:
-    def __init__(self, supabase: Client):
+    def __init__(self, supabase: Client, broadcast_fn: Callable = None):
         self.db = supabase
         self.running = False
         self._task: Optional[asyncio.Task] = None
         self._rotation_count = 0
+        self._broadcast = broadcast_fn or (lambda e: None)
 
-    # â”€â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Lifecycle ----------------------------------------
 
     def start(self):
         if self.running:
@@ -44,7 +46,7 @@ class Director:
         }).eq("id", 1).execute()
         print("[Director] Skip requested")
 
-    # â”€â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Config -------------------------------------------
 
     def get_weight(self, key: str, default: float = 0.0) -> float:
         try:
@@ -55,7 +57,7 @@ class Director:
             pass
         return default
 
-    # â”€â”€â”€ Main Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Main Loop ----------------------------------------
 
     async def _loop(self):
         print("[Director] Loop started")
@@ -74,7 +76,7 @@ class Director:
         state = self._get_state()
 
         if not state or not state.get("current_link_id"):
-            # No link selected yet â€” pick one immediately
+            # No link selected yet -- pick one immediately
             await self._rotate(now)
             return
 
@@ -82,20 +84,20 @@ class Director:
         if rotation_ends:
             ends_at = datetime.fromisoformat(rotation_ends.replace("Z", "+00:00"))
             if now < ends_at:
-                # Still showing â€” adjust timers based on votes
+                # Still showing -- adjust timers based on votes
                 await self._adjust_timers(state, now)
                 return
 
         # Time to rotate
         await self._rotate(now)
 
-    # â”€â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- State --------------------------------------------
 
     def _get_state(self) -> Optional[dict]:
         resp = self.db.table("global_state").select("*").eq("id", 1).execute()
         return resp.data[0] if resp.data else None
 
-    # â”€â”€â”€ Timer Adjustment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Timer Adjustment ---------------------------------
 
     async def _adjust_timers(self, state: dict, now: datetime):
         link_id = state["current_link_id"]
@@ -135,29 +137,49 @@ class Director:
         base_end = started + timedelta(seconds=base_duration)
         adjusted = base_end + timedelta(seconds=bonus - penalty)
 
-        if adjusted != datetime.fromisoformat(state["current_end"].replace("Z", "+00:00")):
-            self.db.table("director_state").update({
-                "current_end": adjusted.isoformat()
-            }).eq("id", state["id"]).execute()
+        # Update rotation_ends_at if changed
+        current_ends = state.get("rotation_ends_at")
+        if current_ends:
+            current_ends_dt = datetime.fromisoformat(current_ends.replace("Z", "+00:00"))
+            if abs((adjusted - current_ends_dt).total_seconds()) > 1:
+                self.db.table("global_state").update({
+                    "rotation_ends_at": adjusted.isoformat()
+                }).eq("id", 1).execute()
 
-    # â”€â”€â”€ Rotation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Rotation -----------------------------------------
 
     async def _rotate(self, now: datetime):
         self._rotation_count += 1
         print(f"[Director] Rotating (#{self._rotation_count})...")
 
+        # Get current state to check nominations and clear them
+        old_state = self._get_state()
+        old_rotation_id = (old_state or {}).get("started_at", "")
+        old_satellites = (old_state or {}).get("satellites") or []
+
+        # Check nominations for current satellites
+        nominated_link = self._check_nominations(old_rotation_id, old_satellites)
+
+        # Clear nominations for the completed rotation
+        self._clear_nominations(old_rotation_id)
+
         # Calculate momentum
         momentum = self._calculate_momentum(now)
-
-        # Pick pool
-        pool = self._pick_pool()
-        print(f"[Director] Pool: {pool}")
 
         # Get fatigue list (recently shown link IDs)
         fatigue = self._get_fatigue()
 
-        # Select link
-        link = self._select_from_pool(pool, momentum, fatigue)
+        if nominated_link:
+            # A satellite was nominated -- use it
+            link = nominated_link
+            pool = "nominated"
+            print(f"[Director] Nomination winner: link {link['id']}")
+        else:
+            # Normal pool selection
+            pool = self._pick_pool()
+            print(f"[Director] Pool: {pool}")
+            link = self._select_from_pool(pool, momentum, fatigue)
+
         if not link:
             print("[Director] No links available!")
             await asyncio.sleep(10)
@@ -204,11 +226,82 @@ class Director:
             "duration_seconds": duration,
         }).execute()
 
+        # Broadcast rotation event
+        self._broadcast({
+            "type": "rotation",
+            "new_link": {
+                "id": link_id,
+                "title": link.get("title", ""),
+                "url": link.get("url", ""),
+            },
+            "reason": pool,
+        })
+
         # Periodic score propagation
         if self._rotation_count % 10 == 0:
             self._propagate_scores()
 
-    # â”€â”€â”€ Momentum â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Nominations --------------------------------------
+
+    def _check_nominations(self, rotation_id: str, satellites: list) -> Optional[dict]:
+        """Check if any satellite has nominations; return the most-nominated one."""
+        if not rotation_id or not satellites:
+            return None
+
+        try:
+            nom_resp = self.db.table("nominations").select(
+                "link_id"
+            ).eq("rotation_id", rotation_id).execute()
+            nominations = nom_resp.data or []
+        except Exception as e:
+            print(f"[Director] Error checking nominations: {e}")
+            return None
+
+        if not nominations:
+            return None
+
+        # Count nominations per link
+        nom_counts: dict = {}
+        for n in nominations:
+            lid = n["link_id"]
+            nom_counts[lid] = nom_counts.get(lid, 0) + 1
+
+        # Filter to only satellite link IDs
+        sat_link_ids = set(s.get("link_id") for s in satellites)
+        sat_noms = {lid: count for lid, count in nom_counts.items() if lid in sat_link_ids}
+
+        if not sat_noms:
+            return None
+
+        # Find the winner (most nominations)
+        winner_id = max(sat_noms, key=sat_noms.get)
+        winner_count = sat_noms[winner_id]
+        print(f"[Director] Nomination winner: link {winner_id} with {winner_count} nominations")
+
+        # Fetch the link data
+        try:
+            link_resp = self.db.table("links").select(
+                "id, title, feed_id, direct_score, times_shown, last_shown_at, url"
+            ).eq("id", winner_id).execute()
+            if link_resp.data:
+                return link_resp.data[0]
+        except Exception as e:
+            print(f"[Director] Error fetching nominated link: {e}")
+
+        return None
+
+    def _clear_nominations(self, rotation_id: str):
+        """Clear all nominations for a completed rotation."""
+        if not rotation_id:
+            return
+        try:
+            self.db.table("nominations").delete().eq(
+                "rotation_id", rotation_id
+            ).execute()
+        except Exception as e:
+            print(f"[Director] Error clearing nominations: {e}")
+
+    # --- Momentum -----------------------------------------
 
     def _calculate_momentum(self, now: datetime) -> dict:
         window_min = int(self.get_weight("momentum_window_min", 30))
@@ -267,7 +360,7 @@ class Director:
             "total_down": total_down,
         }
 
-    # â”€â”€â”€ Pool Selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Pool Selection -----------------------------------
 
     def _pick_pool(self) -> str:
         weights = [
@@ -297,7 +390,7 @@ class Director:
         """Select a link with 0 or few votes, preferring high-trust feeds."""
         # Get links not recently shown, ordered by feed trust
         resp = self.db.table("links").select(
-            "id, title, feed_id, direct_score, times_shown, last_shown_at"
+            "id, title, url, feed_id, direct_score, times_shown, last_shown_at"
         ).eq("direct_score", 0).order("times_shown").limit(50).execute()
 
         candidates = [l for l in (resp.data or []) if l["id"] not in fatigue]
@@ -305,7 +398,7 @@ class Director:
         if not candidates:
             # Fallback: low-score links
             resp = self.db.table("links").select(
-                "id, title, feed_id, direct_score, times_shown, last_shown_at"
+                "id, title, url, feed_id, direct_score, times_shown, last_shown_at"
             ).order("times_shown").limit(50).execute()
             candidates = [l for l in (resp.data or []) if l["id"] not in fatigue]
 
@@ -325,16 +418,16 @@ class Director:
         return random.choices(candidates, weights=weights, k=1)[0]
 
     def _select_rerun(self, fatigue: list) -> Optional[dict]:
-        """Select a proven classic â€” high direct_score, not recently shown."""
+        """Select a proven classic -- high direct_score, not recently shown."""
         resp = self.db.table("links").select(
-            "id, title, feed_id, direct_score, times_shown, last_shown_at"
+            "id, title, url, feed_id, direct_score, times_shown, last_shown_at"
         ).gt("direct_score", 0).order("direct_score", desc=True).limit(20).execute()
 
         candidates = [l for l in (resp.data or []) if l["id"] not in fatigue]
         if not candidates:
             return self._select_fresh({}, fatigue)  # fallback
 
-        # Weight by score Ã— recency (longer since shown = more likely)
+        # Weight by score x recency (longer since shown = more likely)
         now = datetime.now(timezone.utc)
         weights = []
         for l in candidates:
@@ -365,7 +458,7 @@ class Director:
 
         # Get all links, filter out fatigue + recent feeds
         resp = self.db.table("links").select(
-            "id, title, feed_id, direct_score, times_shown, last_shown_at"
+            "id, title, url, feed_id, direct_score, times_shown, last_shown_at"
         ).limit(200).execute()
 
         candidates = [
@@ -381,7 +474,7 @@ class Director:
 
         return random.choice(candidates)
 
-    # â”€â”€â”€ Satellites â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Satellites ---------------------------------------
 
     def _generate_satellites(self, link_id: int, fatigue: list) -> list:
         sat_count = int(self.get_weight("satellite_count", 5))
@@ -393,7 +486,7 @@ class Director:
         ).eq("id", link_id).execute()
 
         if not resp.data or not resp.data[0].get("content_vector"):
-            # No vector â€” return random satellites
+            # No vector -- return random satellites
             return self._random_satellites(link_id, sat_count, positions, fatigue)
 
         # Use Supabase RPC for vector similarity (if available)
@@ -429,7 +522,7 @@ class Director:
         labels = ["Deep Dive", "Deep Dive", "Pivot", "Pivot", "Wildcard"]
         return labels[index] if index < len(labels) else "Related"
 
-    # â”€â”€â”€ Score Propagation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # --- Score Propagation --------------------------------
 
     def _propagate_scores(self):
         print("[Director] Propagating scores...")

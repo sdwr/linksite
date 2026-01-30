@@ -3,8 +3,11 @@ Feed Ingestion System + Director -- FastAPI Application
 """
 
 import os
+import json
 import uuid
 import asyncio
+import time
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -12,6 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, BackgroundTasks, Form, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import StreamingResponse
 from supabase import create_client, Client
 from pydantic import BaseModel
 
@@ -28,7 +32,35 @@ supabase: Client = create_client(
     os.getenv('SUPABASE_KEY')
 )
 
-director = Director(supabase)
+# ============================================================
+# SSE Broadcast Infrastructure
+# ============================================================
+
+connected_clients: set[asyncio.Queue] = set()
+recent_actions: deque = deque(maxlen=50)  # ring buffer of recent user actions
+
+
+def broadcast_event(event: dict):
+    """Push an event to all connected SSE clients."""
+    for q in list(connected_clients):
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            pass  # drop if client is too slow
+
+
+def record_action(action: dict):
+    """Record an action for recent_actions feed and broadcast it."""
+    action["_ts"] = time.time()
+    recent_actions.append(action)
+    broadcast_event(action)
+
+
+# ============================================================
+# Director Setup
+# ============================================================
+
+director = Director(supabase, broadcast_fn=broadcast_event)
 
 
 # --- Lifespan (Director startup/shutdown) ---
@@ -82,10 +114,14 @@ async def user_identity_middleware(request: Request, call_next):
     return response
 
 
-# --- Vote Model ---
+# --- Request Models ---
 
 class VoteRequest(BaseModel):
     value: int  # 1 or -1
+
+
+class NominateRequest(BaseModel):
+    user_id: Optional[str] = None  # optional override; defaults to cookie
 
 
 # ============================================================
@@ -180,11 +216,148 @@ def _esc(s: str) -> str:
 
 
 # ============================================================
-# API: Voting
+# SSE Stream: GET /api/stream
 # ============================================================
 
-@app.post("/api/links/{link_id}/vote")
-async def vote_on_link(link_id: int, vote: VoteRequest, request: Request):
+async def get_stream_state() -> dict:
+    """Build the full state snapshot for SSE heartbeat."""
+    now = datetime.now(timezone.utc)
+
+    state = supabase.table("global_state").select("*").eq("id", 1).execute()
+    gs = state.data[0] if state.data else {}
+
+    # Featured link
+    featured = None
+    link_id = gs.get("current_link_id")
+    if link_id:
+        link_resp = supabase.table("links").select(
+            "id, url, title, feed_id"
+        ).eq("id", link_id).execute()
+        link_data = link_resp.data[0] if link_resp.data else None
+
+        # Get feed name
+        feed_name = None
+        if link_data and link_data.get("feed_id"):
+            feed_resp = supabase.table("feeds").select("url, type").eq("id", link_data["feed_id"]).execute()
+            if feed_resp.data:
+                u = feed_resp.data[0].get("url", "")
+                feed_name = u.split("/")[-1] or u.split("/")[-2] if "/" in u else u
+
+        rotation_ends = gs.get("rotation_ends_at")
+        started_at = gs.get("started_at")
+        time_remaining = 0
+        total_duration = int(_get_weight("rotation_default_sec", 120))
+        if rotation_ends:
+            ends = datetime.fromisoformat(rotation_ends.replace("Z", "+00:00"))
+            time_remaining = max(0, (ends - now).total_seconds())
+
+        if link_data:
+            featured = {
+                "link": {
+                    "id": link_data["id"],
+                    "title": link_data.get("title", ""),
+                    "url": link_data.get("url", ""),
+                    "feed_name": feed_name,
+                },
+                "time_remaining_sec": round(time_remaining, 1),
+                "total_duration_sec": total_duration,
+                "reason": gs.get("selection_reason", "unknown"),
+                "started_at": started_at,
+            }
+
+    # Satellites with reveal status and nomination counts
+    satellites_raw = gs.get("satellites") or []
+    satellites = []
+    rotation_id = gs.get("started_at", "")  # use started_at as rotation identifier
+
+    for sat in satellites_raw:
+        reveal_at = sat.get("reveal_at")
+        revealed = True
+        if reveal_at:
+            revealed = now >= datetime.fromisoformat(reveal_at.replace("Z", "+00:00"))
+
+        # Get nomination count for this satellite in current rotation
+        nom_count = 0
+        sat_link_id = sat.get("link_id")
+        if sat_link_id:
+            try:
+                nom_resp = supabase.table("nominations").select("id").eq(
+                    "link_id", sat_link_id
+                ).eq("rotation_id", rotation_id).execute()
+                nom_count = len(nom_resp.data or [])
+            except Exception:
+                pass
+
+        satellites.append({
+            "id": sat.get("link_id"),
+            "title": sat.get("title", ""),
+            "url": sat.get("url", ""),
+            "position": sat.get("position", ""),
+            "label": sat.get("label", ""),
+            "revealed": revealed,
+            "nominations": nom_count,
+        })
+
+    # Recent actions (from in-memory deque)
+    now_ts = time.time()
+    recent = []
+    for action in list(recent_actions):
+        ago = now_ts - action.get("_ts", now_ts)
+        entry = {k: v for k, v in action.items() if k != "_ts"}
+        entry["ago_sec"] = round(ago, 1)
+        recent.append(entry)
+    # Only last 20
+    recent = recent[-20:]
+
+    return {
+        "type": "state",
+        "featured": featured,
+        "satellites": satellites,
+        "recent_actions": recent,
+        "viewer_count": len(connected_clients),
+        "server_time": now.isoformat(),
+    }
+
+
+@app.get("/api/stream")
+async def event_stream():
+    """Server-Sent Events endpoint. Pushes state every 2s or immediate events."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    connected_clients.add(queue)
+
+    async def generate():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=2.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    # Heartbeat: send full state
+                    state = await get_stream_state()
+                    yield f"data: {json.dumps(state)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            connected_clients.discard(queue)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ============================================================
+# API: Reactions (vote/react)
+# ============================================================
+
+@app.post("/api/links/{link_id}/react")
+async def react_to_link(link_id: int, vote: VoteRequest, request: Request):
+    """React to a link: +1 (like) or -1 (dislike). Affects score and timer."""
     if vote.value not in (1, -1):
         raise HTTPException(400, "value must be 1 or -1")
 
@@ -207,7 +380,27 @@ async def vote_on_link(link_id: int, vote: VoteRequest, request: Request):
         "value": vote.value,
     }).execute()
 
-    return {"ok": True, "value": vote.value}
+    # Update direct_score on the link
+    all_votes = supabase.table("votes").select("value").eq("link_id", link_id).execute()
+    new_score = sum(v["value"] for v in (all_votes.data or []))
+    supabase.table("links").update({"direct_score": new_score}).eq("id", link_id).execute()
+
+    # Broadcast reaction event
+    record_action({
+        "type": "react",
+        "link_id": link_id,
+        "value": vote.value,
+        "user_id": user_id[:12],  # truncate for privacy
+    })
+
+    return {"ok": True, "value": vote.value, "new_score": new_score}
+
+
+# Backward-compat alias
+@app.post("/api/links/{link_id}/vote")
+async def vote_on_link(link_id: int, vote: VoteRequest, request: Request):
+    """Alias for /api/links/{link_id}/react (backward compat)."""
+    return await react_to_link(link_id, vote, request)
 
 
 @app.get("/api/links/{link_id}/votes")
@@ -228,6 +421,85 @@ async def get_link_votes(link_id: int, request: Request):
         "my_votes_count": len(my_votes.data or []),
         "my_last_vote_at": my_votes.data[0]["created_at"] if my_votes.data else None,
     }
+
+
+# ============================================================
+# API: Nominations
+# ============================================================
+
+@app.post("/api/links/{link_id}/nominate")
+async def nominate_link(link_id: int, body: NominateRequest, request: Request):
+    """Nominate a satellite link to be featured next."""
+    user_id = body.user_id or request.state.user_id
+
+    # Get current rotation_id (started_at from global_state)
+    state = supabase.table("global_state").select("started_at, satellites").eq("id", 1).execute()
+    gs = state.data[0] if state.data else {}
+    rotation_id = gs.get("started_at", "")
+
+    if not rotation_id:
+        raise HTTPException(400, "No active rotation")
+
+    # Check that link_id is actually a satellite in the current rotation
+    satellites = gs.get("satellites") or []
+    sat_ids = [s.get("link_id") for s in satellites]
+    if link_id not in sat_ids:
+        raise HTTPException(400, "Link is not a current satellite")
+
+    # Check if user already nominated in this rotation
+    existing = supabase.table("nominations").select("id").eq(
+        "user_id", user_id
+    ).eq("rotation_id", rotation_id).execute()
+
+    if existing.data:
+        # Update existing nomination to new link
+        supabase.table("nominations").update({
+            "link_id": link_id,
+        }).eq("id", existing.data[0]["id"]).execute()
+    else:
+        # Insert new nomination
+        supabase.table("nominations").insert({
+            "link_id": link_id,
+            "user_id": user_id,
+            "rotation_id": rotation_id,
+        }).execute()
+
+    # Apply +0.5 score boost to the nominated link
+    link_resp = supabase.table("links").select("direct_score").eq("id", link_id).execute()
+    if link_resp.data:
+        current_score = link_resp.data[0].get("direct_score", 0) or 0
+        supabase.table("links").update({
+            "direct_score": current_score + 0.5
+        }).eq("id", link_id).execute()
+
+    # Get nomination count for this link in this rotation
+    nom_resp = supabase.table("nominations").select("id").eq(
+        "link_id", link_id
+    ).eq("rotation_id", rotation_id).execute()
+    nom_count = len(nom_resp.data or [])
+
+    # Broadcast nomination event
+    record_action({
+        "type": "nominate",
+        "link_id": link_id,
+        "user_id": user_id[:12],
+    })
+
+    return {"ok": True, "nominations": nom_count}
+
+
+@app.get("/api/links/{link_id}/nominations")
+async def get_link_nominations(link_id: int):
+    """Get nomination count for a link in the current rotation."""
+    state = supabase.table("global_state").select("started_at").eq("id", 1).execute()
+    gs = state.data[0] if state.data else {}
+    rotation_id = gs.get("started_at", "")
+
+    nom_resp = supabase.table("nominations").select("id").eq(
+        "link_id", link_id
+    ).eq("rotation_id", rotation_id).execute()
+
+    return {"link_id": link_id, "nominations": len(nom_resp.data or [])}
 
 
 # ============================================================
@@ -265,8 +537,9 @@ async def api_now(request: Request):
             ).in_("id", tag_ids).execute()
             tags = tags_resp.data or []
 
-    # Get satellites with reveal status
+    # Get satellites with reveal status and nomination counts
     satellites = gs.get("satellites") or []
+    rotation_id = gs.get("started_at", "")
     for sat in satellites:
         reveal_at = sat.get("reveal_at")
         if reveal_at:
@@ -275,6 +548,17 @@ async def api_now(request: Request):
             )
         else:
             sat["revealed"] = True
+
+        # Add nomination count
+        sat_link_id = sat.get("link_id")
+        if sat_link_id:
+            try:
+                nom_resp = supabase.table("nominations").select("id").eq(
+                    "link_id", sat_link_id
+                ).eq("rotation_id", rotation_id).execute()
+                sat["nominations"] = len(nom_resp.data or [])
+            except Exception:
+                sat["nominations"] = 0
 
     # Vote counts
     all_votes = supabase.table("votes").select("value").eq("link_id", link_id).execute()
@@ -307,6 +591,7 @@ async def api_now(request: Request):
             "my_last_vote_at": my_votes.data[0]["created_at"] if my_votes.data else None,
         },
         "selection_reason": gs.get("selection_reason"),
+        "viewer_count": len(connected_clients),
     }
 
 
@@ -632,6 +917,7 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
             <div class="kv"><span class="label">Time Remaining</span><span>{time_remaining}</span></div>
             <div class="kv"><span class="label">Started At</span><span>{_esc((gs.get("started_at") or "-")[:19])}</span></div>
             <div class="kv"><span class="label">Rotation Ends</span><span>{_esc((rotation_ends or "-")[:19])}</span></div>
+            <div class="kv"><span class="label">Viewers</span><span>{len(connected_clients)}</span></div>
             <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
                 <form method="POST" action="/admin/director/start" class="inline-form"><button class="btn btn-primary btn-sm">&#9654; Start</button></form>
                 <form method="POST" action="/admin/director/stop" class="inline-form"><button class="btn btn-sm">&#9632; Stop</button></form>

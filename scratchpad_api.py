@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+import urllib.parse
 import math
 import threading
 
@@ -53,6 +54,10 @@ def get_base_domain(url: str) -> str:
     """Extract base domain URL from a full URL."""
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
+
+def get_thum_url(url: str) -> str:
+    """Get a screenshot via thum.io (free, no API key)."""
+    return f"https://image.thum.io/get/width/600/{url}"
 
 def find_or_create_parent(url: str, link_id: int):
     """Find or create a parent link for the base domain."""
@@ -141,6 +146,12 @@ def ingest_link_async(link_id: int, url: str):
             
             # Set parent link
             find_or_create_parent(url, link_id)
+            
+            # If no og_image, set thum.io screenshot as fallback
+            cur = supabase.table("links").select("og_image_url, screenshot_url").eq("id", link_id).execute()
+            if cur.data and not cur.data[0].get("og_image_url") and not cur.data[0].get("screenshot_url"):
+                supabase.table("links").update({"screenshot_url": get_thum_url(url)}).eq("id", link_id).execute()
+                print(f"[Scratchpad] Set thum.io screenshot for link {link_id}")
             
         except Exception as e:
             print(f"[Scratchpad] Ingest error for {link_id}: {e}")
@@ -409,11 +420,31 @@ async def api_links_browse(
     
     links = resp.data or []
     
-    # Add tag and note count to each
-    for link in links:
-        link["tags"] = get_link_tags(link["id"])
-        nc = supabase.table("notes").select("id", count="exact").eq("link_id", link["id"]).execute()
-        link["note_count"] = nc.count or 0
+    if links:
+        link_ids = [l["id"] for l in links]
+        
+        # Batch fetch all link_tags for these links
+        lt_resp = supabase.table("link_tags").select("link_id, tag_id").in_("link_id", link_ids).execute()
+        tag_ids = list(set(r["tag_id"] for r in (lt_resp.data or [])))
+        tags_by_id = {}
+        if tag_ids:
+            tags_resp = supabase.table("tags").select("id, name, slug").in_("id", tag_ids).execute()
+            tags_by_id = {t["id"]: t for t in (tags_resp.data or [])}
+        
+        # Group tags by link
+        link_tag_map = {}
+        for r in (lt_resp.data or []):
+            link_tag_map.setdefault(r["link_id"], []).append(tags_by_id.get(r["tag_id"], {}))
+        
+        # Batch fetch note counts
+        notes_resp = supabase.table("notes").select("link_id").in_("link_id", link_ids).execute()
+        note_counts = {}
+        for n in (notes_resp.data or []):
+            note_counts[n["link_id"]] = note_counts.get(n["link_id"], 0) + 1
+        
+        for link in links:
+            link["tags"] = link_tag_map.get(link["id"], [])
+            link["note_count"] = note_counts.get(link["id"], 0)
     
     return {"links": links, "total": resp.count or 0}
 
@@ -466,7 +497,7 @@ DARK_STYLE = """
 NAV_HTML = """
 <nav class="nav">
     <a href="/browse">Browse</a>
-    <a href="/add">+ Add Link</a>
+    <a href="/add">Check Link</a>
     <a href="/links">All Links</a>
     <a href="/admin">Admin</a>
 </nav>
@@ -490,59 +521,39 @@ def time_ago(dt_str):
 
 @router.get("/add", response_class=HTMLResponse)
 async def page_add_link():
-    """Form to add a new link."""
-    return f"""<!DOCTYPE html><html><head><title>Add Link</title>{DARK_STYLE}</head><body>
+    """Minimal check/save link page."""
+    return f"""<!DOCTYPE html><html><head><title>Check Link</title>{DARK_STYLE}
+    <style>
+        .check-container {{ display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; }}
+        .check-form {{ width: 100%%; max-width: 600px; }}
+        .check-form input {{ font-size: 18px; padding: 14px 20px; text-align: center; }}
+        .check-form button {{ width: 100%%; margin-top: 12px; padding: 12px; font-size: 16px; }}
+    </style></head><body>
     <div class="container">
         {NAV_HTML}
-        <h1>Save a Link</h1>
-        <div class="card" style="margin-top:16px">
-            <form method="POST" action="/add">
-                <div class="form-group">
-                    <label>URL *</label>
-                    <input name="url" type="url" required placeholder="https://example.com/article">
-                </div>
-                <div class="form-group">
-                    <label>Title (auto-scraped if blank)</label>
-                    <input name="title" placeholder="Optional title">
-                </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea name="description" placeholder="Optional description"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Tags (comma-separated)</label>
-                    <input name="tags" placeholder="ai, research, interesting">
-                </div>
-                <div class="form-group">
-                    <label>Note</label>
-                    <textarea name="note" placeholder="Why is this interesting? Any observations?"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Your Name</label>
-                    <input name="author" placeholder="anonymous" value="anonymous">
-                </div>
-                <button type="submit" class="btn btn-primary">Save Link</button>
-            </form>
+        <div class="check-container">
+            <h1 style="margin-bottom:24px">Check Link</h1>
+            <div class="check-form">
+                <form method="POST" action="/add">
+                    <input name="url" type="url" required placeholder="Paste a URL..." autofocus>
+                    <input name="author" type="hidden" value="web-user">
+                    <button type="submit" class="btn btn-primary">Check</button>
+                </form>
+            </div>
         </div>
     </div></body></html>"""
 
 
 @router.post("/add")
 async def page_add_link_submit(request: Request):
-    """Handle form submission."""
+    """Check/save a link and redirect to its detail page."""
     form = await request.form()
     url = form.get("url", "").strip()
     if not url:
         return RedirectResponse("/add", status_code=303)
     
-    title = form.get("title", "").strip() or None
-    description = form.get("description", "").strip() or None
-    tags_str = form.get("tags", "").strip()
-    tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else None
-    note = form.get("note", "").strip() or None
-    author = form.get("author", "").strip() or "anonymous"
-    
-    body = LinkCreate(url=url, title=title, description=description, tags=tags, note=note, author=author)
+    author = form.get("author", "").strip() or "web-user"
+    body = LinkCreate(url=url, author=author)
     result = await api_link_create(body)
     link_id = result["link"]["id"]
     
@@ -564,8 +575,8 @@ async def page_link_detail(link_id: int):
     domain = parsed.netloc
     
     # Image
-    img_url = link.get("og_image_url") or link.get("screenshot_url")
-    img_html = f'<img src="{img_url}" class="preview-img" alt="">' if img_url else '<div class="placeholder-img">No preview</div>'
+    img_url = link.get("og_image_url") or link.get("screenshot_url") or get_thum_url(link["url"])
+    img_html = f'<img src="{img_url}" class="preview-img" alt="" loading="lazy">'
     
     # Tags
     tags_html = " ".join(f'<span class="tag">{t["name"]}</span>' for t in link["tags"])
@@ -687,7 +698,7 @@ async def page_browse(
     # Cards
     cards_html = ""
     for link in links:
-        img_url = link.get("og_image_url") or link.get("screenshot_url")
+        img_url = link.get("og_image_url") or link.get("screenshot_url") or get_thum_url(link["url"])
         img_html = f'<img src="{img_url}" alt="">' if img_url else '<div class="placeholder-img">ðŸ”—</div>'
         domain = urlparse(link["url"]).netloc
         tags_html = " ".join(f'<span class="tag">{t["name"]}</span>' for t in link.get("tags", []))

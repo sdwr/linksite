@@ -24,6 +24,10 @@ from ingest import (
     parse_bluesky_feed, scrape_article, vectorize
 )
 from director import Director
+from scratchpad_routes import register_scratchpad_routes
+
+import ingest as ingest_module
+from scratchpad_api import router as scratchpad_router, init as scratchpad_init
 
 load_dotenv()
 
@@ -84,6 +88,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount scratchpad API
+scratchpad_init(supabase, ingest_module)
+app.include_router(scratchpad_router)
+
+
+
+# Register scratchpad API + HTML routes
+register_scratchpad_routes(app, supabase, vectorize)
 
 # --- User Identity Middleware ---
 
@@ -178,6 +190,8 @@ input[type="text"], input[type="url"], input[type="number"], select {
 def _nav():
     return """<nav>
         <span class="brand">Linksite</span>
+        <a href="/browse">Browse</a>
+        <a href="/add">+ Add</a>
         <a href="/links">Links</a>
         <a href="/admin">Admin</a>
         <a href="/api/now">API Status</a>
@@ -772,7 +786,7 @@ _sync_all_cancel = threading.Event()
 
 @app.get("/")
 async def root():
-    return RedirectResponse(url="/links")
+    return RedirectResponse(url="/add")
 
 
 @app.get("/links", response_class=HTMLResponse)

@@ -223,7 +223,150 @@ def _add_tags(link_id: int, tag_names: list, author: str = "anonymous"):
             pass  # Already exists
 
 
+# --- Helpers ---
+
+LINKSITE_BASE_URL = "https://linksite-dev-bawuw.sprites.app"
+
+def normalize_url(url: str) -> str:
+    """Normalize a URL: add https:// if missing, strip www."""
+    url = url.strip()
+    if not url:
+        return url
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    parsed = urlparse(url)
+    host = parsed.netloc or ''
+    if host.startswith('www.'):
+        host = host[4:]
+        url = parsed._replace(netloc=host).geturl()
+    return url
+
+
 # --- API Routes ---
+
+@router.get("/api/check")
+async def api_check_link(url: str, comments: int = 5):
+    """
+    Bot-friendly endpoint. Check/lookup a URL, return compact summary.
+    If not found, returns is_new hint so caller can POST /api/link to create.
+    
+    Query params:
+        url: the URL to check (bare domains like example.com accepted)
+        comments: max comments to return (default 5)
+    """
+    url = normalize_url(url)
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    resp = supabase.table("links").select(
+        "id, url, title, direct_score, created_at, parent_link_id"
+    ).eq("url", url).execute()
+
+    if not resp.data:
+        return {"found": False, "url": url}
+
+    link = resp.data[0]
+    lid = link["id"]
+    domain = (urlparse(link["url"]).netloc or "")
+
+    # Tags (compact: just names)
+    tags = get_link_tags(lid)
+    tag_names = [t["name"] for t in tags]
+
+    # Comments (most recent N)
+    notes_resp = supabase.table("notes").select(
+        "author, text, created_at"
+    ).eq("link_id", lid).order("created_at", desc=True).limit(comments).execute()
+    comment_list = []
+    for n in (notes_resp.data or []):
+        comment_list.append({
+            "author": n.get("author", "anon"),
+            "text": n.get("text", ""),
+            "time": n.get("created_at", ""),
+        })
+
+    return {
+        "found": True,
+        "id": lid,
+        "url": link["url"],
+        "title": link.get("title") or "",
+        "domain": domain,
+        "tags": tag_names,
+        "stars": link.get("direct_score", 0) or 0,
+        "comments": comment_list,
+        "comment_count": len(get_link_notes(lid)),
+        "web_url": f"{LINKSITE_BASE_URL}/link/{lid}",
+    }
+
+
+@router.post("/api/check")
+async def api_check_and_save(url: str = "", comments: int = 5):
+    """
+    Bot-friendly endpoint. Check a URL — create if new, return compact summary.
+    Accepts url as query param or JSON body.
+    
+    Query params:
+        url: the URL to check/save
+        comments: max comments to return (default 5)
+    """
+    url = normalize_url(url)
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    # Check if exists
+    existing = supabase.table("links").select(
+        "id, url, title, direct_score, created_at, parent_link_id"
+    ).eq("url", url).execute()
+
+    is_new = False
+    if existing.data:
+        link = existing.data[0]
+    else:
+        # Create new
+        resp = supabase.table("links").insert({
+            "url": url,
+            "source": "agent",
+            "submitted_by": "bot",
+        }).execute()
+        if not resp.data:
+            raise HTTPException(status_code=500, detail="Failed to create link")
+        link = resp.data[0]
+        is_new = True
+        # Trigger async ingestion
+        ingest_link_async(link["id"], url)
+
+    lid = link["id"]
+    domain = (urlparse(link["url"]).netloc or "")
+
+    # Tags
+    tags = get_link_tags(lid)
+    tag_names = [t["name"] for t in tags]
+
+    # Comments
+    notes_resp = supabase.table("notes").select(
+        "author, text, created_at"
+    ).eq("link_id", lid).order("created_at", desc=True).limit(comments).execute()
+    comment_list = []
+    for n in (notes_resp.data or []):
+        comment_list.append({
+            "author": n.get("author", "anon"),
+            "text": n.get("text", ""),
+            "time": n.get("created_at", ""),
+        })
+
+    return {
+        "is_new": is_new,
+        "id": lid,
+        "url": link["url"],
+        "title": link.get("title") or "",
+        "domain": domain,
+        "tags": tag_names,
+        "stars": link.get("direct_score", 0) or 0,
+        "comments": comment_list,
+        "comment_count": len(get_link_notes(lid)),
+        "web_url": f"{LINKSITE_BASE_URL}/link/{lid}",
+    }
+
 
 @router.get("/api/link")
 async def api_link_lookup(url: str):

@@ -324,7 +324,7 @@ label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; fon
 
 def dark_nav():
     return """<div class="topbar">
-        <a href="/" class="brand">&#128279; Linksite</a>
+        <a href="/browse" class="brand">&#128279; Linksite</a>
         <a href="/browse">Browse</a>
         <a href="/add">Check Link</a>
     </div>"""
@@ -834,7 +834,15 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                     <p style="margin-top:12px"><a href="/add" class="btn btn-primary">Add the first one</a></p>
                 </div>'''
 
-            body = f'''{sort_html}{tag_html}{cards}'''
+            # Filter banner when searching by domain/query
+            filter_html = ''
+            if q:
+                filter_html = f'''<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:10px 16px;background:#1e293b;border:1px solid #334155;border-radius:8px">
+                    <span style="color:#94a3b8;font-size:14px">Showing links from <strong style="color:#e2e8f0">{_esc(q)}</strong></span>
+                    <a href="/browse" style="color:#64748b;font-size:18px;line-height:1;margin-left:auto;text-decoration:none" title="Clear filter">&times;</a>
+                </div>'''
+
+            body = f'''{filter_html}{sort_html}{tag_html}{cards}'''
 
             return HTMLResponse(dark_page("Browse", body))
         except Exception as e:

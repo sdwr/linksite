@@ -786,7 +786,7 @@ _sync_all_cancel = threading.Event()
 
 @app.get("/")
 async def root():
-    return RedirectResponse(url="/browse")
+    return RedirectResponse(url="/add")
 
 
 @app.get("/links", response_class=HTMLResponse)

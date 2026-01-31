@@ -740,18 +740,36 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                     qr = qr.order('created_at', desc=True)
                 links = (qr.limit(60).execute()).data or []
 
-            # Enrich with tags and note counts
-            for link in links:
-                lid = link['id']
-                nr = supabase.table('notes').select('id', count='exact').eq('link_id', lid).execute()
-                link['note_count'] = nr.count or 0
-                lt = supabase.table('link_tags').select('tag_id').eq('link_id', lid).execute()
-                tids = [x['tag_id'] for x in (lt.data or [])]
-                if tids:
-                    tr = supabase.table('tags').select('slug, name').in_('id', tids).execute()
-                    link['tags'] = tr.data or []
-                else:
-                    link['tags'] = []
+            # Batch-enrich: tags and note counts in 3 queries instead of 152
+            if links:
+                link_ids = [lk['id'] for lk in links]
+
+                # 1) All notes for these links (just ids for counting)
+                all_notes = supabase.table('notes').select('link_id').in_('link_id', link_ids).execute()
+                note_counts = {}
+                for n in (all_notes.data or []):
+                    note_counts[n['link_id']] = note_counts.get(n['link_id'], 0) + 1
+
+                # 2) All link_tags for these links
+                all_lt = supabase.table('link_tags').select('link_id, tag_id').in_('link_id', link_ids).execute()
+                link_tag_map = {}
+                all_tag_ids = set()
+                for lt in (all_lt.data or []):
+                    link_tag_map.setdefault(lt['link_id'], []).append(lt['tag_id'])
+                    all_tag_ids.add(lt['tag_id'])
+
+                # 3) All tag names at once
+                tag_name_map = {}
+                if all_tag_ids:
+                    all_tags_data = supabase.table('tags').select('id, slug, name').in_('id', list(all_tag_ids)).execute()
+                    for t in (all_tags_data.data or []):
+                        tag_name_map[t['id']] = {'slug': t['slug'], 'name': t['name']}
+
+                # Apply to each link
+                for link in links:
+                    lid = link['id']
+                    link['note_count'] = note_counts.get(lid, 0)
+                    link['tags'] = [tag_name_map[tid] for tid in link_tag_map.get(lid, []) if tid in tag_name_map]
 
             if sort == "noted":
                 links.sort(key=lambda x: x.get('note_count', 0), reverse=True)

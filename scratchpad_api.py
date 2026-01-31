@@ -465,8 +465,10 @@ DARK_STYLE = """
 
 NAV_HTML = """
 <nav class="nav">
-    <a href="/scratchpad">Browse</a>
-    <a href="/scratchpad/add">+ Add Link</a>
+    <a href="/browse">Browse</a>
+    <a href="/add">+ Add Link</a>
+    <a href="/links">All Links</a>
+    <a href="/admin">Admin</a>
 </nav>
 """
 
@@ -486,7 +488,7 @@ def time_ago(dt_str):
         return ""
 
 
-@router.get("/scratchpad/add", response_class=HTMLResponse)
+@router.get("/add", response_class=HTMLResponse)
 async def page_add_link():
     """Form to add a new link."""
     return f"""<!DOCTYPE html><html><head><title>Add Link</title>{DARK_STYLE}</head><body>
@@ -494,7 +496,7 @@ async def page_add_link():
         {NAV_HTML}
         <h1>Save a Link</h1>
         <div class="card" style="margin-top:16px">
-            <form method="POST" action="/scratchpad/add">
+            <form method="POST" action="/add">
                 <div class="form-group">
                     <label>URL *</label>
                     <input name="url" type="url" required placeholder="https://example.com/article">
@@ -525,13 +527,13 @@ async def page_add_link():
     </div></body></html>"""
 
 
-@router.post("/scratchpad/add")
+@router.post("/add")
 async def page_add_link_submit(request: Request):
     """Handle form submission."""
     form = await request.form()
     url = form.get("url", "").strip()
     if not url:
-        return RedirectResponse("/scratchpad/add", status_code=303)
+        return RedirectResponse("/add", status_code=303)
     
     title = form.get("title", "").strip() or None
     description = form.get("description", "").strip() or None
@@ -544,10 +546,10 @@ async def page_add_link_submit(request: Request):
     result = await api_link_create(body)
     link_id = result["link"]["id"]
     
-    return RedirectResponse(f"/scratchpad/link/{link_id}", status_code=303)
+    return RedirectResponse(f"/link/{link_id}", status_code=303)
 
 
-@router.get("/scratchpad/link/{link_id}", response_class=HTMLResponse)
+@router.get("/link/{link_id}", response_class=HTMLResponse)
 async def page_link_detail(link_id: int):
     """Link detail page."""
     resp = supabase.table("links").select(
@@ -586,7 +588,7 @@ async def page_link_detail(link_id: int):
     for r in link["related"]:
         rd = urlparse(r["url"]).netloc
         related_html += f'''<div class="related-item">
-            <a href="/scratchpad/link/{r["id"]}">{r.get("title") or r["url"][:60]}</a>
+            <a href="/link/{r["id"]}">{r.get("title") or r["url"][:60]}</a>
             <span class="domain">{rd}</span>
         </div>'''
     if not related_html:
@@ -595,7 +597,7 @@ async def page_link_detail(link_id: int):
     # Parent
     parent_html = ""
     if link["parent"]:
-        parent_html = f'<div style="margin-bottom:12px"><span class="meta">Part of:</span> <a href="/scratchpad/link/{link["parent"]["id"]}">{link["parent"].get("title") or link["parent"]["url"]}</a></div>'
+        parent_html = f'<div style="margin-bottom:12px"><span class="meta">Part of:</span> <a href="/link/{link["parent"]["id"]}">{link["parent"].get("title") or link["parent"]["url"]}</a></div>'
     
     return f"""<!DOCTYPE html><html><head><title>{link.get("title") or "Link"} â€” Scratchpad</title>{DARK_STYLE}</head><body>
     <div class="container">
@@ -616,7 +618,7 @@ async def page_link_detail(link_id: int):
             <div style="margin-top:16px">{tags_html}</div>
             
             <!-- Add tag form -->
-            <form method="POST" action="/scratchpad/link/{link_id}/add-tag" style="margin-top:12px;display:flex;gap:8px">
+            <form method="POST" action="/link/{link_id}/add-tag" style="margin-top:12px;display:flex;gap:8px">
                 <input name="tags" placeholder="Add tags (comma-separated)" style="flex:1">
                 <input name="author" type="hidden" value="web-user">
                 <button class="btn" type="submit">+ Tag</button>
@@ -627,7 +629,7 @@ async def page_link_detail(link_id: int):
             <h2>Notes ({len(link["notes"])})</h2>
             {notes_html}
             
-            <form method="POST" action="/scratchpad/link/{link_id}/add-note" style="margin-top:16px">
+            <form method="POST" action="/link/{link_id}/add-note" style="margin-top:16px">
                 <div class="form-group">
                     <input name="author" placeholder="Your name" value="anonymous" style="margin-bottom:8px">
                     <textarea name="text" placeholder="Add a note..." required></textarea>
@@ -643,17 +645,17 @@ async def page_link_detail(link_id: int):
     </div></body></html>"""
 
 
-@router.post("/scratchpad/link/{link_id}/add-note")
+@router.post("/link/{link_id}/add-note")
 async def page_add_note(link_id: int, request: Request):
     form = await request.form()
     author = form.get("author", "anonymous").strip() or "anonymous"
     text = form.get("text", "").strip()
     if text:
         supabase.table("notes").insert({"link_id": link_id, "author": author, "text": text}).execute()
-    return RedirectResponse(f"/scratchpad/link/{link_id}", status_code=303)
+    return RedirectResponse(f"/link/{link_id}", status_code=303)
 
 
-@router.post("/scratchpad/link/{link_id}/add-tag")
+@router.post("/link/{link_id}/add-tag")
 async def page_add_tag(link_id: int, request: Request):
     form = await request.form()
     tags_str = form.get("tags", "").strip()
@@ -661,10 +663,10 @@ async def page_add_tag(link_id: int, request: Request):
     if tags_str:
         tags = [t.strip() for t in tags_str.split(",") if t.strip()]
         _add_tags(link_id, tags, author)
-    return RedirectResponse(f"/scratchpad/link/{link_id}", status_code=303)
+    return RedirectResponse(f"/link/{link_id}", status_code=303)
 
 
-@router.get("/scratchpad", response_class=HTMLResponse)
+@router.get("/browse", response_class=HTMLResponse)
 async def page_browse(
     tag: Optional[str] = None,
     sort: str = "recent",
@@ -680,7 +682,7 @@ async def page_browse(
     tag_filter_html = ""
     for t in (all_tags.data or []):
         active = "active" if tag == t["slug"] else ""
-        tag_filter_html += f'<a href="/scratchpad?tag={t["slug"]}&sort={sort}" class="sort-bar a {active}" style="background:{("#1e1b4b" if active else "transparent")}">{t["name"]}</a>'
+        tag_filter_html += f'<a href="/browse?tag={t["slug"]}&sort={sort}" class="sort-bar a {active}" style="background:{("#1e1b4b" if active else "transparent")}">{t["name"]}</a>'
     
     # Cards
     cards_html = ""
@@ -691,7 +693,7 @@ async def page_browse(
         tags_html = " ".join(f'<span class="tag">{t["name"]}</span>' for t in link.get("tags", []))
         note_badge = f'<span class="badge">{link["note_count"]} notes</span>' if link.get("note_count") else ""
         
-        cards_html += f'''<a href="/scratchpad/link/{link["id"]}" class="link-card" style="text-decoration:none;color:inherit">
+        cards_html += f'''<a href="/link/{link["id"]}" class="link-card" style="text-decoration:none;color:inherit">
             {img_html}
             <div class="card-body">
                 <div class="card-title">{link.get("title") or link["url"][:50]}</div>
@@ -705,18 +707,18 @@ async def page_browse(
         </a>'''
     
     if not cards_html:
-        cards_html = '<p class="meta">No links found. <a href="/scratchpad/add">Add one!</a></p>'
+        cards_html = '<p class="meta">No links found. <a href="/add">Add one!</a></p>'
     
     return f"""<!DOCTYPE html><html><head><title>Scratchpad â€” Links</title>{DARK_STYLE}</head><body>
     <div class="container">
         {NAV_HTML}
         <h1>Links</h1>
         <div class="sort-bar" style="margin-top:16px">
-            <a href="/scratchpad?sort=recent{'&tag='+tag if tag else ''}" class="{'active' if sort=='recent' else ''}">Recent</a>
-            <a href="/scratchpad?sort=score{'&tag='+tag if tag else ''}" class="{'active' if sort=='score' else ''}">Top</a>
+            <a href="/browse?sort=recent{'&tag='+tag if tag else ''}" class="{'active' if sort=='recent' else ''}">Recent</a>
+            <a href="/browse?sort=score{'&tag='+tag if tag else ''}" class="{'active' if sort=='score' else ''}">Top</a>
             {f'| {tag_filter_html}' if tag_filter_html else ''}
             <div style="flex:1"></div>
-            <form style="display:flex;gap:8px" action="/scratchpad">
+            <form style="display:flex;gap:8px" action="/browse">
                 <input name="q" placeholder="Search..." value="{q or ''}" style="width:200px">
                 <input name="sort" type="hidden" value="{sort}">
                 <button class="btn" type="submit">Search</button>

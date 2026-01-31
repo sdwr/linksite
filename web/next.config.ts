@@ -23,6 +23,19 @@ const nextConfig: NextConfig = {
         source: "/links",
         destination: "http://localhost:8000/links",
       },
+      // Proxy scratchpad pages to FastAPI backend
+      {
+        source: "/browse",
+        destination: "http://localhost:8000/browse",
+      },
+      {
+        source: "/add",
+        destination: "http://localhost:8000/add",
+      },
+      {
+        source: "/link/:path*",
+        destination: "http://localhost:8000/link/:path*",
+      },
     ];
   },
 };

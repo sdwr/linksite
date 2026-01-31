@@ -627,16 +627,8 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             related_html = '<p style="color:#475569;font-size:13px">No related links found.</p>'
 
         body = f"""{msgs}
-        <div class="card">
-            {img_html}
-            <div style="color:#64748b;font-size:13px;margin-bottom:8px">
-                <a href="{_esc(url)}" target="_blank">{_esc(domain)}</a>
-                &middot; {time_ago(link.get('created_at'))}
-                {f' &middot; by {_esc(link.get("submitted_by") or "")}' if link.get("submitted_by") and link["submitted_by"] != "web" else ''}
-            </div>
-            {parent_html}
-            <h1>{title}</h1>
-            <div style="margin:16px 0;display:flex;align-items:center;gap:8px">
+        <div class="card" style="position:relative">
+            <div style="position:absolute;top:24px;right:24px">
                 <form method="POST" action="/link/{link_id}/star" style="margin:0">
                     <button type="submit" class="star-btn">
                         <span class="star-icon">&#9734;</span>
@@ -644,8 +636,16 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                     </button>
                 </form>
             </div>
-            <div style="margin:12px 0">
-                <span style="color:#64748b;font-size:13px;margin-right:8px;font-weight:500">Tags:</span>
+            {parent_html}
+            <h1 style="margin-bottom:4px;padding-right:80px"><a href="{_esc(url)}" target="_blank" style="color:#f1f5f9;text-decoration:none">{title}</a></h1>
+            <div style="color:#64748b;font-size:13px;margin-bottom:12px">
+                <a href="/browse?q={_esc(domain)}" style="color:#64748b">{_esc(domain)}</a>
+                &middot; {time_ago(link.get('created_at'))}
+                {f' &middot; by {_esc(link.get("submitted_by") or "")}' if link.get("submitted_by") and link["submitted_by"] != "web" else ''}
+            </div>
+            {img_html}
+            <div style="display:flex;align-items:baseline;gap:0;flex-wrap:wrap;margin-top:8px">
+                <span style="color:#64748b;font-size:13px;margin-right:8px;font-weight:500;white-space:nowrap">Tags:</span>
                 {tags_html}
             </div>
         </div>

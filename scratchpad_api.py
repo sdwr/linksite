@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
+import random
 from urllib.parse import urlparse
 import math
 import threading
@@ -468,3 +469,25 @@ async def api_links_browse(
         link["note_count"] = nc.count or 0
 
     return {"links": links, "total": resp.count or 0}
+
+@router.get("/api/random")
+async def api_random_link():
+    """Pick a random link and redirect to its detail page."""
+    count_resp = supabase.table("links").select("id", count="exact").neq("source", "auto-parent").execute()
+    total = count_resp.count or 0
+    if total == 0:
+        return RedirectResponse(url="/browse", status_code=302)
+    rand_offset = random.randint(0, total - 1)
+    resp = supabase.table("links").select("id").neq("source", "auto-parent").order(
+        "id", desc=False
+    ).range(rand_offset, rand_offset).execute()
+    if resp.data:
+        return RedirectResponse(url=f"/link/{resp.data[0]['id']}", status_code=302)
+    # Fallback
+    resp = supabase.table("links").select("id").neq("source", "auto-parent").order(
+        "id", desc=False
+    ).limit(100).execute()
+    if resp.data:
+        choice = random.choice(resp.data)
+        return RedirectResponse(url=f"/link/{choice['id']}", status_code=302)
+    return RedirectResponse(url="/browse", status_code=302)

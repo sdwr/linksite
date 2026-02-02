@@ -655,7 +655,10 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         </div>
 
         <div class="card">
-            <h2>Related Links</h2>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <h2 style="margin-bottom:0">Related Links</h2>
+                <a href="/api/random" class="btn btn-sm" style="background:#312e81;color:#a5b4fc;border:1px solid #4338ca;text-decoration:none">&#127922; Next Random</a>
+            </div>
             {related_html}
         </div>"""
         return HTMLResponse(dark_page(title, body))
@@ -789,6 +792,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                 {sl("recent","&#128337; Recent")}
                 {sl("score","&#11088; Top")}
                 {sl("noted","&#128221; Most Noted")}
+                <a href="/api/random" style="margin-left:auto;background:#312e81;border-color:#4338ca;color:#a5b4fc">&#127922; Random Link</a>
             </div>'''
 
             # Tag filter bar

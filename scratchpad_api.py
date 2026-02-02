@@ -441,6 +441,9 @@ def check_reverse_lookup(url: str, link_id: int):
         original_url = resolve_reddit_url(url)
     
     if original_url:
+        # Mark the HN/Reddit link as a discussion reference (filtered from browse/random)
+        supabase.table("links").update({"source": "discussion-ref"}).eq("id", link_id).execute()
+        
         # Check if original URL already exists
         existing = supabase.table("links").select("id").eq("url", original_url).execute()
         if existing.data:
@@ -699,6 +702,7 @@ async def api_links_browse(
     )
 
     query = query.neq("source", "auto-parent")
+    query = query.neq("source", "discussion-ref")
 
     if tag:
         tag_resp = supabase.table("tags").select("id").eq("slug", tag).execute()

@@ -526,34 +526,6 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             msgs += f'<div class="msg-ok">{_esc(message)}</div>'
         if error:
             msgs += f'<div class="msg-err">{_esc(error)}</div>'
-        # External Discussions
-        ext_discussions = get_external_discussions(link_id)
-        ext_disc_html = '<div class="card">'
-        ext_disc_html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-        ext_disc_html += '<h2 style="margin-bottom:0">External Discussions</h2>'
-        ext_disc_html += f'<form method="POST" action="/link/{link_id}/refresh-discussions" style="margin:0"><button type="submit" class="refresh-btn">&#8635; Refresh</button></form>'
-        ext_disc_html += '</div>'
-        
-        if ext_discussions:
-            for d in ext_discussions:
-                platform = d.get('platform', '')
-                icon = '&#129412;' if platform == 'hackernews' else '&#129302;'  # Y for HN, robot for reddit
-                platform_label = 'Hacker News' if platform == 'hackernews' else f'r/{d.get("subreddit", "reddit")}'
-                d_title = _esc(d.get('title', 'Discussion'))
-                d_url = _esc(d.get('external_url', '#'))
-                d_score = d.get('score', 0) or 0
-                d_comments = d.get('num_comments', 0) or 0
-                ext_disc_html += f'<a href="{d_url}" target="_blank" class="ext-disc" style="text-decoration:none">'
-                ext_disc_html += f'<div class="platform-icon">{icon}</div>'
-                ext_disc_html += f'<div class="disc-info"><div class="disc-title">{d_title}</div>'
-                ext_disc_html += f'<div class="disc-meta">{_esc(platform_label)}</div></div>'
-                ext_disc_html += f'<div class="disc-stats"><span>&#9650; {d_score}</span><span>&#128172; {d_comments}</span></div>'
-                ext_disc_html += '</a>'
-        else:
-            ext_disc_html += '<p style="color:#475569;font-size:13px;padding:4px 0">No external discussions found yet. Click refresh to check HN and Reddit.</p>'
-        
-        ext_disc_html += '</div>'
-
         body = f"""{msgs}
         <div style="padding: 40px 0 20px; text-align: center;">
             <h1 style="font-size: 32px; margin-bottom: 8px;">Check a Link</h1>

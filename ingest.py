@@ -24,6 +24,78 @@ from sentence_transformers import SentenceTransformer
 
 MAX_ITEMS_PER_FEED = 100
 
+# Invidious instances to try in order (they can be flaky)
+INVIDIOUS_INSTANCES = [
+    "inv.tux.pizza",
+    "vid.puffyan.us",
+    "invidious.snopyta.org",
+]
+
+CONTENT_MAX_CHARS = 10000
+DESCRIPTION_MAX_CHARS = 500
+
+
+def _invidious_get(path: str, timeout: int = 15) -> requests.Response:
+    """Try an Invidious API path across multiple instances, return first success."""
+    last_error = None
+    for instance in INVIDIOUS_INSTANCES:
+        url = f"https://{instance}{path}"
+        try:
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_error = e
+            continue
+    raise Exception(f"All Invidious instances failed for {path}: {last_error}")
+
+
+def _parse_vtt_to_text(vtt_content: str) -> str:
+    """
+    Parse VTT/SRT caption content to plain text.
+    Strips: WEBVTT header, timestamps (00:00:00.000 --> ...), numeric cue IDs, blank lines.
+    Deduplicates consecutive identical lines (common in VTT).
+    """
+    lines = vtt_content.split("\n")
+    text_lines = []
+    prev_line = ""
+
+    for line in lines:
+        line = line.strip()
+
+        # Skip WEBVTT header and metadata
+        if line.startswith("WEBVTT"):
+            continue
+        if line.startswith("Kind:") or line.startswith("Language:"):
+            continue
+        if line.startswith("NOTE"):
+            continue
+
+        # Skip timestamp lines (e.g., "00:00:01.234 --> 00:00:03.456")
+        if re.match(r'\d{2}:\d{2}[:\.]?\d{0,2}[\.,]?\d{0,3}\s*-->', line):
+            continue
+
+        # Skip bare numeric lines (SRT cue identifiers)
+        if re.match(r'^\d+$', line):
+            continue
+
+        # Skip blank lines
+        if not line:
+            continue
+
+        # Strip inline VTT tags like <c>, </c>, <00:00:01.234>, etc.
+        line = re.sub(r'<[^>]+>', '', line).strip()
+
+        if not line:
+            continue
+
+        # Deduplicate consecutive identical lines
+        if line != prev_line:
+            text_lines.append(line)
+            prev_line = line
+
+    return " ".join(text_lines)
+
 
 class ContentExtractor:
     """Handles content extraction from various URL types."""
@@ -51,24 +123,139 @@ class ContentExtractor:
         return any(re.search(pattern, url) for pattern in patterns)
 
     def extract_youtube_content(self, url: str) -> Dict:
+        """
+        Extract YouTube video content using yt-dlp (primary) with oembed fallback.
+        Returns: title, channel_name, description, content (captions), thumbnail, etc.
+        """
         try:
             video_id = self._extract_youtube_id(url)
             if not video_id:
                 raise Exception("Could not extract YouTube video ID")
-            invidious_url = f"https://inv.tux.pizza/api/v1/videos/{video_id}"
-            response = requests.get(invidious_url, timeout=15)
-            response.raise_for_status()
-            data = response.json()
-            return {
-                'title': data.get('title', ''),
-                'channel_name': data.get('author', ''),
-                'transcript': data.get('description', ''),
-                'thumbnail': data.get('videoThumbnails', [{}])[0].get('url', '') if data.get('videoThumbnails') else '',
-                'type': 'youtube',
-                'tags': data.get('keywords', [])
-            }
+
+            canonical_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            # --- Try yt-dlp first (best data) ---
+            try:
+                return self._extract_youtube_ytdlp(video_id, canonical_url)
+            except Exception as yt_err:
+                print(f"[Ingest] yt-dlp failed for {video_id}: {yt_err}")
+
+            # --- Fallback: oEmbed (basic metadata only) ---
+            try:
+                return self._extract_youtube_oembed(video_id, canonical_url)
+            except Exception as oe_err:
+                print(f"[Ingest] oEmbed failed for {video_id}: {oe_err}")
+
+            raise Exception("All YouTube extraction methods failed")
+
         except Exception as e:
             raise Exception(f"Error extracting YouTube content: {str(e)}")
+
+    def _extract_youtube_ytdlp(self, video_id: str, url: str) -> Dict:
+        """Extract YouTube metadata + captions via yt-dlp."""
+        import subprocess, json, tempfile, os
+
+        # Get metadata
+        result = subprocess.run(
+            ['yt-dlp', '--dump-json', '--no-download', '--no-warnings', url],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            raise Exception(f"yt-dlp metadata failed: {result.stderr[:200]}")
+
+        data = json.loads(result.stdout)
+        title = data.get('title', '')
+        channel_name = data.get('channel', data.get('uploader', ''))
+        description = data.get('description', '')
+        duration = data.get('duration', 0)
+        view_count = data.get('view_count', 0)
+        tags = data.get('tags', []) or []
+
+        # Best thumbnail
+        thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+
+        # --- Try to get captions ---
+        captions_text = ''
+        has_captions = False
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sub_path = os.path.join(tmpdir, 'subs')
+                sub_result = subprocess.run(
+                    ['yt-dlp', '--write-auto-sub', '--write-sub', '--sub-lang', 'en',
+                     '--sub-format', 'vtt', '--skip-download', '--no-warnings',
+                     '-o', sub_path, url],
+                    capture_output=True, text=True, timeout=60
+                )
+                # Find the subtitle file
+                for f in os.listdir(tmpdir):
+                    if f.endswith('.vtt'):
+                        vtt_path = os.path.join(tmpdir, f)
+                        with open(vtt_path, 'r', encoding='utf-8') as vf:
+                            raw = vf.read()
+                        captions_text = _parse_vtt_to_text(raw)
+                        has_captions = bool(captions_text.strip())
+                        break
+        except Exception as cap_err:
+            print(f"[Ingest] yt-dlp captions failed for {video_id}: {cap_err}")
+
+        short_description = description[:DESCRIPTION_MAX_CHARS] if description else ''
+        full_content = ''
+        if captions_text:
+            full_content = captions_text[:CONTENT_MAX_CHARS]
+        elif description:
+            full_content = description[:CONTENT_MAX_CHARS]
+
+        meta = {
+            'type': 'youtube',
+            'channel_name': channel_name,
+            'duration': duration,
+            'view_count': view_count,
+            'has_captions': has_captions,
+        }
+
+        return {
+            'title': title,
+            'channel_name': channel_name,
+            'description': short_description,
+            'content': full_content,
+            'thumbnail': thumbnail,
+            'type': 'youtube',
+            'tags': tags[:20],
+            'duration': duration,
+            'view_count': view_count,
+            'has_captions': has_captions,
+            'meta': meta,
+            'transcript': description,
+        }
+
+    def _extract_youtube_oembed(self, video_id: str, url: str) -> Dict:
+        """Lightweight fallback: just title, channel, thumbnail via oEmbed."""
+        import requests as req
+        resp = req.get(
+            f"https://www.youtube.com/oembed?url={url}&format=json",
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        title = data.get('title', '')
+        channel_name = data.get('author_name', '')
+        thumbnail = data.get('thumbnail_url', f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg")
+
+        return {
+            'title': title,
+            'channel_name': channel_name,
+            'description': title,
+            'content': '',
+            'thumbnail': thumbnail,
+            'type': 'youtube',
+            'tags': [],
+            'duration': 0,
+            'view_count': 0,
+            'has_captions': False,
+            'meta': {'type': 'youtube', 'channel_name': channel_name, 'has_captions': False},
+            'transcript': '',
+        }
 
     @staticmethod
     def _extract_youtube_id(url: str) -> Optional[str]:
@@ -82,11 +269,39 @@ class ContentExtractor:
         return None
 
     def extract_website_content(self, url: str) -> Dict:
+        """
+        Extract website/article content via trafilatura with enhanced metadata.
+
+        Returns:
+            title, og_image, description (short ~500 chars), content (full ~10000 chars),
+            main_text (legacy), type, meta (author, date, sitename)
+        """
         try:
             downloaded = trafilatura.fetch_url(url)
             if not downloaded:
                 raise Exception("Could not fetch URL")
-            main_text = trafilatura.extract(downloaded, include_comments=False, include_tables=False) or ''
+
+            # Extract full text content
+            main_text = trafilatura.extract(
+                downloaded,
+                include_comments=False,
+                include_tables=False
+            ) or ''
+
+            # Extract metadata via trafilatura
+            author = None
+            date = None
+            sitename = None
+            try:
+                metadata = trafilatura.extract_metadata(downloaded)
+                if metadata:
+                    author = metadata.author if hasattr(metadata, 'author') else None
+                    date = metadata.date if hasattr(metadata, 'date') else None
+                    sitename = metadata.sitename if hasattr(metadata, 'sitename') else None
+            except Exception as meta_err:
+                print(f"[Ingest] Metadata extraction error for {url}: {meta_err}")
+
+            # Parse HTML for OG tags (same as before)
             soup = BeautifulSoup(downloaded, 'html.parser')
             og_title = None
             og_image = None
@@ -99,17 +314,41 @@ class ContentExtractor:
             if not og_title:
                 title_tag = soup.find('title')
                 og_title = title_tag.string if title_tag else ''
+
+            # Fallback sitename from OG
+            if not sitename:
+                og_site_tag = soup.find('meta', property='og:site_name')
+                if og_site_tag:
+                    sitename = og_site_tag.get('content')
+
+            # Build short description and full content
+            short_description = main_text[:DESCRIPTION_MAX_CHARS] if main_text else ''
+            full_content = main_text[:CONTENT_MAX_CHARS] if main_text else ''
+
+            meta = {
+                'type': 'website',
+            }
+            if author:
+                meta['author'] = author
+            if date:
+                meta['date'] = date
+            if sitename:
+                meta['sitename'] = sitename
+
             return {
                 'title': og_title,
                 'og_image': og_image,
-                'main_text': main_text,
-                'type': 'website'
+                'description': short_description,
+                'content': full_content,
+                'main_text': main_text,  # Legacy compat
+                'type': 'website',
+                'meta': meta,
             }
         except Exception as e:
             raise Exception(f"Error extracting website content: {str(e)}")
 
 
-# â”€â”€â”€ Feed Parsers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ——— Feed Parsers ———————————————————————————————————————————
 
 def resolve_youtube_channel_id(channel_url: str) -> Optional[str]:
     """Fetch a YouTube channel page and extract the channel_id from canonical URL."""
@@ -341,14 +580,14 @@ def parse_bluesky_feed(handle_or_url: str) -> List[Dict]:
     return items
 
 
-# â”€â”€â”€ Legacy helpers (kept for compatibility) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ——— Legacy helpers (kept for compatibility) ————————————————
 
 def scrape_youtube(url: str) -> Dict:
     extractor = ContentExtractor()
     result = extractor.extract_youtube_content(url)
     return {
         'title': result['title'],
-        'description': result['transcript'],
+        'description': result['transcript'],  # Legacy: returns video description
         'tags': result.get('tags', []),
         'channel': result['channel_name'],
         'thumbnail': result['thumbnail'],
@@ -361,13 +600,13 @@ def scrape_article(url: str) -> Dict:
     result = extractor.extract_website_content(url)
     return {
         'title': result['title'],
-        'description': result['main_text'],
+        'description': result['main_text'],  # Legacy: returns full main_text
         'og_image': result['og_image'],
         'type': 'website'
     }
 
 
-# â”€â”€â”€ Vectorization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ——— Vectorization ——————————————————————————————————————————
 
 class TextVectorizer:
     def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):

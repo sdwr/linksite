@@ -105,24 +105,42 @@ def ingest_link_async(link_id: int, url: str):
 
             if result:
                 update = {}
+
+                # Title
                 if result.get("title"):
                     update["title"] = result["title"]
-                if result.get("main_text"):
-                    update["content"] = result["main_text"][:10000]
-                    update["description"] = result["main_text"][:500]
+
+                # Thumbnail / OG image
                 if result.get("og_image"):
                     update["og_image_url"] = result["og_image"]
                 if result.get("thumbnail"):
                     update["og_image_url"] = result["thumbnail"]
-                if result.get("transcript"):
-                    update["content"] = result["transcript"][:10000]
-                    update["description"] = result["transcript"][:500]
+
+                # Content + Description (separate short desc from full content)
+                if result.get("content"):
+                    update["content"] = result["content"][:10000]
+                if result.get("description"):
+                    update["description"] = result["description"][:500]
+                # Fallback: if no separate description, derive from content
+                if not update.get("description") and update.get("content"):
+                    update["description"] = update["content"][:500]
+
+                # Meta JSON — merge new metadata with any existing
+                meta = result.get("meta", {})
+                if meta:
+                    try:
+                        current = supabase.table("links").select("meta_json").eq("id", link_id).execute()
+                        existing_meta = (current.data[0].get("meta_json") or {}) if current.data else {}
+                        existing_meta.update(meta)
+                        update["meta_json"] = existing_meta
+                    except Exception:
+                        update["meta_json"] = meta
 
                 if update:
                     supabase.table("links").update(update).eq("id", link_id).execute()
                     print(f"[Scratchpad] Ingested link {link_id}: {list(update.keys())}")
 
-                # Generate embedding
+                # Generate embedding — prefer content, fall back to description
                 try:
                     text = update.get("content") or update.get("description") or ""
                     if text:

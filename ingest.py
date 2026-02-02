@@ -24,6 +24,15 @@ from sentence_transformers import SentenceTransformer
 
 MAX_ITEMS_PER_FEED = 100
 
+# Invidious instances removed (all public instances are dead)
+
+CONTENT_MAX_CHARS = 10000
+DESCRIPTION_MAX_CHARS = 500
+
+
+# _invidious_get removed (all public Invidious instances are dead)
+
+# _parse_vtt_to_text removed (no caption extraction on this server)
 
 class ContentExtractor:
     """Handles content extraction from various URL types."""
@@ -51,25 +60,54 @@ class ContentExtractor:
         return any(re.search(pattern, url) for pattern in patterns)
 
     def extract_youtube_content(self, url: str) -> Dict:
+        """
+        Extract YouTube video metadata via oEmbed API.
+        Returns: title, channel_name, thumbnail, basic metadata.
+        Note: Invidious instances are dead, yt-dlp gets blocked on cloud IPs.
+        oEmbed gives us title + channel + thumbnail reliably.
+        """
         try:
             video_id = self._extract_youtube_id(url)
             if not video_id:
                 raise Exception("Could not extract YouTube video ID")
-            invidious_url = f"https://inv.tux.pizza/api/v1/videos/{video_id}"
-            response = requests.get(invidious_url, timeout=15)
-            response.raise_for_status()
-            data = response.json()
+
+            canonical_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            # Use oEmbed as the primary (and only) method
+            resp = requests.get(
+                f"https://www.youtube.com/oembed?url={canonical_url}" + "&format=json",
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            title = data.get("title", "")
+            channel_name = data.get("author_name", "")
+            thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+
             return {
-                'title': data.get('title', ''),
-                'channel_name': data.get('author', ''),
-                'transcript': data.get('description', ''),
-                'thumbnail': data.get('videoThumbnails', [{}])[0].get('url', '') if data.get('videoThumbnails') else '',
-                'type': 'youtube',
-                'tags': data.get('keywords', [])
+                "title": title,
+                "channel_name": channel_name,
+                "description": title,
+                "content": "",
+                "thumbnail": thumbnail,
+                "type": "youtube",
+                "tags": [],
+                "duration": 0,
+                "view_count": 0,
+                "has_captions": False,
+                "meta": {
+                    "type": "youtube",
+                    "channel_name": channel_name,
+                    "has_captions": False,
+                },
+                "transcript": "",
             }
+
         except Exception as e:
             raise Exception(f"Error extracting YouTube content: {str(e)}")
-
+    # --- yt-dlp method removed (blocked on cloud IPs) ---
+    # --- oEmbed helper removed (logic inlined into extract_youtube_content) ---
     @staticmethod
     def _extract_youtube_id(url: str) -> Optional[str]:
         patterns = [
@@ -82,11 +120,39 @@ class ContentExtractor:
         return None
 
     def extract_website_content(self, url: str) -> Dict:
+        """
+        Extract website/article content via trafilatura with enhanced metadata.
+
+        Returns:
+            title, og_image, description (short ~500 chars), content (full ~10000 chars),
+            main_text (legacy), type, meta (author, date, sitename)
+        """
         try:
             downloaded = trafilatura.fetch_url(url)
             if not downloaded:
                 raise Exception("Could not fetch URL")
-            main_text = trafilatura.extract(downloaded, include_comments=False, include_tables=False) or ''
+
+            # Extract full text content
+            main_text = trafilatura.extract(
+                downloaded,
+                include_comments=False,
+                include_tables=False
+            ) or ''
+
+            # Extract metadata via trafilatura
+            author = None
+            date = None
+            sitename = None
+            try:
+                metadata = trafilatura.extract_metadata(downloaded)
+                if metadata:
+                    author = metadata.author if hasattr(metadata, 'author') else None
+                    date = metadata.date if hasattr(metadata, 'date') else None
+                    sitename = metadata.sitename if hasattr(metadata, 'sitename') else None
+            except Exception as meta_err:
+                print(f"[Ingest] Metadata extraction error for {url}: {meta_err}")
+
+            # Parse HTML for OG tags (same as before)
             soup = BeautifulSoup(downloaded, 'html.parser')
             og_title = None
             og_image = None
@@ -99,17 +165,41 @@ class ContentExtractor:
             if not og_title:
                 title_tag = soup.find('title')
                 og_title = title_tag.string if title_tag else ''
+
+            # Fallback sitename from OG
+            if not sitename:
+                og_site_tag = soup.find('meta', property='og:site_name')
+                if og_site_tag:
+                    sitename = og_site_tag.get('content')
+
+            # Build short description and full content
+            short_description = main_text[:DESCRIPTION_MAX_CHARS] if main_text else ''
+            full_content = main_text[:CONTENT_MAX_CHARS] if main_text else ''
+
+            meta = {
+                'type': 'website',
+            }
+            if author:
+                meta['author'] = author
+            if date:
+                meta['date'] = date
+            if sitename:
+                meta['sitename'] = sitename
+
             return {
                 'title': og_title,
                 'og_image': og_image,
-                'main_text': main_text,
-                'type': 'website'
+                'description': short_description,
+                'content': full_content,
+                'main_text': main_text,  # Legacy compat
+                'type': 'website',
+                'meta': meta,
             }
         except Exception as e:
             raise Exception(f"Error extracting website content: {str(e)}")
 
 
-# â”€â”€â”€ Feed Parsers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ——— Feed Parsers ———————————————————————————————————————————
 
 def resolve_youtube_channel_id(channel_url: str) -> Optional[str]:
     """Fetch a YouTube channel page and extract the channel_id from canonical URL."""
@@ -341,14 +431,14 @@ def parse_bluesky_feed(handle_or_url: str) -> List[Dict]:
     return items
 
 
-# â”€â”€â”€ Legacy helpers (kept for compatibility) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ——— Legacy helpers (kept for compatibility) ————————————————
 
 def scrape_youtube(url: str) -> Dict:
     extractor = ContentExtractor()
     result = extractor.extract_youtube_content(url)
     return {
         'title': result['title'],
-        'description': result['transcript'],
+        'description': result['transcript'],  # Legacy: returns video description
         'tags': result.get('tags', []),
         'channel': result['channel_name'],
         'thumbnail': result['thumbnail'],
@@ -361,13 +451,13 @@ def scrape_article(url: str) -> Dict:
     result = extractor.extract_website_content(url)
     return {
         'title': result['title'],
-        'description': result['main_text'],
+        'description': result['main_text'],  # Legacy: returns full main_text
         'og_image': result['og_image'],
         'type': 'website'
     }
 
 
-# â”€â”€â”€ Vectorization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ——— Vectorization ——————————————————————————————————————————
 
 class TextVectorizer:
     def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):

@@ -453,15 +453,21 @@ def check_reverse_lookup(url: str, link_id: int):
     domain = parsed.netloc.lower()
     
     original_url = None
+    is_discussion_platform = False
     
     if "news.ycombinator.com" in domain:
+        is_discussion_platform = True
         original_url = resolve_hn_url(url)
     elif "reddit.com" in domain and "/comments/" in url:
+        is_discussion_platform = True
         original_url = resolve_reddit_url(url)
     
-    if original_url:
-        # Mark the HN/Reddit link as a discussion reference (filtered from browse/random)
+    # Mark HN/Reddit links as discussion refs so they're filtered from browse/random
+    if is_discussion_platform:
         supabase.table("links").update({"source": "discussion-ref"}).eq("id", link_id).execute()
+        print(f"[ExtDisc] Marked link {link_id} as discussion-ref")
+    
+    if original_url:
         
         # Check if original URL already exists
         existing = supabase.table("links").select("id").eq("url", original_url).execute()

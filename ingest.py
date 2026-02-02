@@ -24,78 +24,15 @@ from sentence_transformers import SentenceTransformer
 
 MAX_ITEMS_PER_FEED = 100
 
-# Invidious instances to try in order (they can be flaky)
-INVIDIOUS_INSTANCES = [
-    "inv.tux.pizza",
-    "vid.puffyan.us",
-    "invidious.snopyta.org",
-]
+# Invidious instances removed (all public instances are dead)
 
 CONTENT_MAX_CHARS = 10000
 DESCRIPTION_MAX_CHARS = 500
 
 
-def _invidious_get(path: str, timeout: int = 15) -> requests.Response:
-    """Try an Invidious API path across multiple instances, return first success."""
-    last_error = None
-    for instance in INVIDIOUS_INSTANCES:
-        url = f"https://{instance}{path}"
-        try:
-            resp = requests.get(url, timeout=timeout)
-            resp.raise_for_status()
-            return resp
-        except Exception as e:
-            last_error = e
-            continue
-    raise Exception(f"All Invidious instances failed for {path}: {last_error}")
+# _invidious_get removed (all public Invidious instances are dead)
 
-
-def _parse_vtt_to_text(vtt_content: str) -> str:
-    """
-    Parse VTT/SRT caption content to plain text.
-    Strips: WEBVTT header, timestamps (00:00:00.000 --> ...), numeric cue IDs, blank lines.
-    Deduplicates consecutive identical lines (common in VTT).
-    """
-    lines = vtt_content.split("\n")
-    text_lines = []
-    prev_line = ""
-
-    for line in lines:
-        line = line.strip()
-
-        # Skip WEBVTT header and metadata
-        if line.startswith("WEBVTT"):
-            continue
-        if line.startswith("Kind:") or line.startswith("Language:"):
-            continue
-        if line.startswith("NOTE"):
-            continue
-
-        # Skip timestamp lines (e.g., "00:00:01.234 --> 00:00:03.456")
-        if re.match(r'\d{2}:\d{2}[:\.]?\d{0,2}[\.,]?\d{0,3}\s*-->', line):
-            continue
-
-        # Skip bare numeric lines (SRT cue identifiers)
-        if re.match(r'^\d+$', line):
-            continue
-
-        # Skip blank lines
-        if not line:
-            continue
-
-        # Strip inline VTT tags like <c>, </c>, <00:00:01.234>, etc.
-        line = re.sub(r'<[^>]+>', '', line).strip()
-
-        if not line:
-            continue
-
-        # Deduplicate consecutive identical lines
-        if line != prev_line:
-            text_lines.append(line)
-            prev_line = line
-
-    return " ".join(text_lines)
-
+# _parse_vtt_to_text removed (no caption extraction on this server)
 
 class ContentExtractor:
     """Handles content extraction from various URL types."""
@@ -124,8 +61,10 @@ class ContentExtractor:
 
     def extract_youtube_content(self, url: str) -> Dict:
         """
-        Extract YouTube video content using yt-dlp (primary) with oembed fallback.
-        Returns: title, channel_name, description, content (captions), thumbnail, etc.
+        Extract YouTube video metadata via oEmbed API.
+        Returns: title, channel_name, thumbnail, basic metadata.
+        Note: Invidious instances are dead, yt-dlp gets blocked on cloud IPs.
+        oEmbed gives us title + channel + thumbnail reliably.
         """
         try:
             video_id = self._extract_youtube_id(url)
@@ -134,129 +73,41 @@ class ContentExtractor:
 
             canonical_url = f"https://www.youtube.com/watch?v={video_id}"
 
-            # --- Try yt-dlp first (best data) ---
-            try:
-                return self._extract_youtube_ytdlp(video_id, canonical_url)
-            except Exception as yt_err:
-                print(f"[Ingest] yt-dlp failed for {video_id}: {yt_err}")
+            # Use oEmbed as the primary (and only) method
+            resp = requests.get(
+                f"https://www.youtube.com/oembed?url={canonical_url}" + "&format=json",
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-            # --- Fallback: oEmbed (basic metadata only) ---
-            try:
-                return self._extract_youtube_oembed(video_id, canonical_url)
-            except Exception as oe_err:
-                print(f"[Ingest] oEmbed failed for {video_id}: {oe_err}")
+            title = data.get("title", "")
+            channel_name = data.get("author_name", "")
+            thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
 
-            raise Exception("All YouTube extraction methods failed")
+            return {
+                "title": title,
+                "channel_name": channel_name,
+                "description": title,
+                "content": "",
+                "thumbnail": thumbnail,
+                "type": "youtube",
+                "tags": [],
+                "duration": 0,
+                "view_count": 0,
+                "has_captions": False,
+                "meta": {
+                    "type": "youtube",
+                    "channel_name": channel_name,
+                    "has_captions": False,
+                },
+                "transcript": "",
+            }
 
         except Exception as e:
             raise Exception(f"Error extracting YouTube content: {str(e)}")
-
-    def _extract_youtube_ytdlp(self, video_id: str, url: str) -> Dict:
-        """Extract YouTube metadata + captions via yt-dlp."""
-        import subprocess, json, tempfile, os
-
-        # Get metadata
-        result = subprocess.run(
-            ['yt-dlp', '--dump-json', '--no-download', '--no-warnings', url],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode != 0:
-            raise Exception(f"yt-dlp metadata failed: {result.stderr[:200]}")
-
-        data = json.loads(result.stdout)
-        title = data.get('title', '')
-        channel_name = data.get('channel', data.get('uploader', ''))
-        description = data.get('description', '')
-        duration = data.get('duration', 0)
-        view_count = data.get('view_count', 0)
-        tags = data.get('tags', []) or []
-
-        # Best thumbnail
-        thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
-
-        # --- Try to get captions ---
-        captions_text = ''
-        has_captions = False
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                sub_path = os.path.join(tmpdir, 'subs')
-                sub_result = subprocess.run(
-                    ['yt-dlp', '--write-auto-sub', '--write-sub', '--sub-lang', 'en',
-                     '--sub-format', 'vtt', '--skip-download', '--no-warnings',
-                     '-o', sub_path, url],
-                    capture_output=True, text=True, timeout=60
-                )
-                # Find the subtitle file
-                for f in os.listdir(tmpdir):
-                    if f.endswith('.vtt'):
-                        vtt_path = os.path.join(tmpdir, f)
-                        with open(vtt_path, 'r', encoding='utf-8') as vf:
-                            raw = vf.read()
-                        captions_text = _parse_vtt_to_text(raw)
-                        has_captions = bool(captions_text.strip())
-                        break
-        except Exception as cap_err:
-            print(f"[Ingest] yt-dlp captions failed for {video_id}: {cap_err}")
-
-        short_description = description[:DESCRIPTION_MAX_CHARS] if description else ''
-        full_content = ''
-        if captions_text:
-            full_content = captions_text[:CONTENT_MAX_CHARS]
-        elif description:
-            full_content = description[:CONTENT_MAX_CHARS]
-
-        meta = {
-            'type': 'youtube',
-            'channel_name': channel_name,
-            'duration': duration,
-            'view_count': view_count,
-            'has_captions': has_captions,
-        }
-
-        return {
-            'title': title,
-            'channel_name': channel_name,
-            'description': short_description,
-            'content': full_content,
-            'thumbnail': thumbnail,
-            'type': 'youtube',
-            'tags': tags[:20],
-            'duration': duration,
-            'view_count': view_count,
-            'has_captions': has_captions,
-            'meta': meta,
-            'transcript': description,
-        }
-
-    def _extract_youtube_oembed(self, video_id: str, url: str) -> Dict:
-        """Lightweight fallback: just title, channel, thumbnail via oEmbed."""
-        import requests as req
-        resp = req.get(
-            f"https://www.youtube.com/oembed?url={url}&format=json",
-            timeout=10
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        title = data.get('title', '')
-        channel_name = data.get('author_name', '')
-        thumbnail = data.get('thumbnail_url', f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg")
-
-        return {
-            'title': title,
-            'channel_name': channel_name,
-            'description': title,
-            'content': '',
-            'thumbnail': thumbnail,
-            'type': 'youtube',
-            'tags': [],
-            'duration': 0,
-            'view_count': 0,
-            'has_captions': False,
-            'meta': {'type': 'youtube', 'channel_name': channel_name, 'has_captions': False},
-            'transcript': '',
-        }
-
+    # --- yt-dlp method removed (blocked on cloud IPs) ---
+    # --- oEmbed helper removed (logic inlined into extract_youtube_content) ---
     @staticmethod
     def _extract_youtube_id(url: str) -> Optional[str]:
         patterns = [

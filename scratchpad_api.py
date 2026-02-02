@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 import math
 import threading
+import httpx
+from datetime import datetime as dt_cls
 
 router = APIRouter()
 
@@ -141,6 +143,14 @@ def ingest_link_async(link_id: int, url: str):
 
     thread = threading.Thread(target=_ingest, daemon=True)
     thread.start()
+    # Also fetch external discussions in background
+    def _ext_disc():
+        import time
+        time.sleep(2)  # small delay to let ingestion start first
+        fetch_and_save_external_discussions(link_id, url)
+        check_reverse_lookup(url, link_id)
+    ext_thread = threading.Thread(target=_ext_disc, daemon=True)
+    ext_thread.start()
 
 
 def get_link_tags(link_id: int) -> list:
@@ -200,6 +210,7 @@ def enrich_link(link: dict) -> dict:
         link["parent"] = None
 
     link["note_count"] = len(link["notes"])
+    link["external_discussions"] = get_external_discussions(link["id"])
     return link
 
 
@@ -240,6 +251,221 @@ def normalize_url(url: str) -> str:
         host = host[4:]
         url = parsed._replace(netloc=host).geturl()
     return url
+
+
+
+
+# --- External Discussions ---
+
+def find_external_discussions(url: str) -> list:
+    """Query HN Algolia and Reddit for discussions about this URL."""
+    results = []
+    
+    # Strip scheme for better search matching
+    from urllib.parse import urlparse as _urlparse
+    search_url = url
+    _parsed = _urlparse(url)
+    if _parsed.scheme:
+        search_url = url.split("://", 1)[1] if "://" in url else url
+    
+    # 1. Hacker News via Algolia
+    try:
+        resp = httpx.get(
+            "https://hn.algolia.com/api/v1/search",
+            params={"query": search_url, "restrictSearchableAttributes": "url", "hitsPerPage": 20},
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            for hit in data.get("hits", []):
+                ext_created = None
+                if hit.get("created_at"):
+                    try:
+                        ext_created = hit["created_at"]
+                    except Exception:
+                        pass
+                results.append({
+                    "platform": "hackernews",
+                    "external_url": f"https://news.ycombinator.com/item?id={hit.get('objectID', '')}",
+                    "external_id": hit.get("objectID", ""),
+                    "title": hit.get("title") or f"HN Discussion ({hit.get('objectID', '')})",
+                    "score": hit.get("points", 0) or 0,
+                    "num_comments": hit.get("num_comments", 0) or 0,
+                    "subreddit": None,
+                    "external_created_at": ext_created,
+                })
+        print(f"[ExtDisc] HN returned {len(results)} results for {url}")
+    except Exception as e:
+        print(f"[ExtDisc] HN error for {url}: {e}")
+    
+    # 2. Reddit
+    try:
+        resp = httpx.get(
+            "https://www.reddit.com/search.json",
+            params={"q": f"url:{url}", "sort": "top", "limit": 20},
+            headers={"User-Agent": "Linksite/1.0 (external discussion finder)"},
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            children = data.get("data", {}).get("children", [])
+            for child in children:
+                post = child.get("data", {})
+                ext_created = None
+                if post.get("created_utc"):
+                    try:
+                        from datetime import datetime, timezone
+                        ext_created = datetime.fromtimestamp(post["created_utc"], tz=timezone.utc).isoformat()
+                    except Exception:
+                        pass
+                results.append({
+                    "platform": "reddit",
+                    "external_url": f"https://www.reddit.com{post.get('permalink', '')}",
+                    "external_id": post.get("id", ""),
+                    "title": post.get("title", "Reddit Discussion"),
+                    "score": post.get("score", 0) or 0,
+                    "num_comments": post.get("num_comments", 0) or 0,
+                    "subreddit": post.get("subreddit", ""),
+                    "external_created_at": ext_created,
+                })
+            print(f"[ExtDisc] Reddit returned {len(children)} results for {url}")
+        else:
+            print(f"[ExtDisc] Reddit returned status {resp.status_code} for {url}")
+    except Exception as e:
+        print(f"[ExtDisc] Reddit error for {url}: {e}")
+    
+    return results
+
+
+def save_external_discussions(link_id: int, discussions: list):
+    """Save external discussions to DB, upsert by (link_id, platform, external_id)."""
+    saved = 0
+    for d in discussions:
+        try:
+            row = {
+                "link_id": link_id,
+                "platform": d["platform"],
+                "external_url": d["external_url"],
+                "external_id": d.get("external_id", ""),
+                "title": d.get("title", ""),
+                "score": d.get("score", 0),
+                "num_comments": d.get("num_comments", 0),
+                "subreddit": d.get("subreddit"),
+                "external_created_at": d.get("external_created_at"),
+            }
+            supabase.table("external_discussions").upsert(
+                row,
+                on_conflict="link_id,platform,external_id"
+            ).execute()
+            saved += 1
+        except Exception as e:
+            print(f"[ExtDisc] Save error: {e}")
+    print(f"[ExtDisc] Saved {saved}/{len(discussions)} discussions for link {link_id}")
+    return saved
+
+
+def get_external_discussions(link_id: int) -> list:
+    """Fetch saved external discussions for a link."""
+    try:
+        resp = supabase.table("external_discussions").select("*").eq(
+            "link_id", link_id
+        ).order("num_comments", desc=True).execute()
+        return resp.data or []
+    except Exception as e:
+        print(f"[ExtDisc] Fetch error for link {link_id}: {e}")
+        return []
+
+
+def fetch_and_save_external_discussions(link_id: int, url: str):
+    """Find and save external discussions (run in background thread)."""
+    try:
+        discussions = find_external_discussions(url)
+        if discussions:
+            save_external_discussions(link_id, discussions)
+    except Exception as e:
+        print(f"[ExtDisc] fetch_and_save error for link {link_id}: {e}")
+
+
+def resolve_hn_url(hn_url: str) -> str:
+    """Given an HN item URL, find the original URL it points to."""
+    try:
+        import re
+        match = re.search(r'id=(\d+)', hn_url)
+        if not match:
+            return None
+        item_id = match.group(1)
+        resp = httpx.get(f"https://hn.algolia.com/api/v1/items/{item_id}", timeout=10, follow_redirects=True)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("url")
+    except Exception as e:
+        print(f"[ExtDisc] HN resolve error: {e}")
+    return None
+
+
+def resolve_reddit_url(reddit_url: str) -> str:
+    """Given a Reddit post URL, find the original URL it links to."""
+    try:
+        resp = httpx.get(
+            reddit_url + ".json",
+            headers={"User-Agent": "Linksite/1.0"},
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0:
+                post_data = data[0].get("data", {}).get("children", [{}])[0].get("data", {})
+                url = post_data.get("url", "")
+                # Skip self posts and reddit links
+                if url and not url.startswith("https://www.reddit.com") and not post_data.get("is_self"):
+                    return url
+    except Exception as e:
+        print(f"[ExtDisc] Reddit resolve error: {e}")
+    return None
+
+
+def check_reverse_lookup(url: str, link_id: int):
+    """If URL is an HN or Reddit link, find the original URL and save it."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    
+    original_url = None
+    
+    if "news.ycombinator.com" in domain:
+        original_url = resolve_hn_url(url)
+    elif "reddit.com" in domain and "/comments/" in url:
+        original_url = resolve_reddit_url(url)
+    
+    if original_url:
+        # Check if original URL already exists
+        existing = supabase.table("links").select("id").eq("url", original_url).execute()
+        if existing.data:
+            original_link_id = existing.data[0]["id"]
+            # Link the HN/Reddit link as a child of the original
+            supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
+            print(f"[ExtDisc] Reverse: linked {link_id} -> existing {original_link_id} ({original_url})")
+        else:
+            # Create the original link
+            resp = supabase.table("links").insert({
+                "url": original_url,
+                "source": "reverse-lookup",
+                "submitted_by": "auto",
+            }).execute()
+            if resp.data:
+                original_link_id = resp.data[0]["id"]
+                # Set parent
+                supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
+                print(f"[ExtDisc] Reverse: created {original_link_id} ({original_url}) as parent of {link_id}")
+                # Trigger ingestion + external discussion lookup for the original
+                ingest_link_async(original_link_id, original_url)
+                # Also find discussions for the original URL
+                def _disc():
+                    fetch_and_save_external_discussions(original_link_id, original_url)
+                threading.Thread(target=_disc, daemon=True).start()
 
 
 # --- API Routes ---
@@ -298,6 +524,17 @@ async def api_check_link(url: str = "", comments: int = 5):
             "time": n.get("created_at", ""),
         })
 
+    # Fetch external discussions
+    ext_disc = get_external_discussions(lid)
+    ext_disc_list = [{
+        "platform": d.get("platform", ""),
+        "title": d.get("title", ""),
+        "url": d.get("external_url", ""),
+        "score": d.get("score", 0),
+        "num_comments": d.get("num_comments", 0),
+        "subreddit": d.get("subreddit"),
+    } for d in ext_disc]
+
     return {
         "is_new": is_new,
         "id": lid,
@@ -309,6 +546,7 @@ async def api_check_link(url: str = "", comments: int = 5):
         "comments": comment_list,
         "comment_count": len(get_link_notes(lid)),
         "web_url": f"{LINKSITE_BASE_URL}/link/{lid}",
+        "external_discussions": ext_disc_list,
     }
 
 
@@ -422,6 +660,29 @@ async def api_link_tag_remove(link_id: int, slug: str):
 async def api_link_related(link_id: int, limit: int = 10):
     return {"related": get_related_links(link_id, limit)}
 
+
+
+
+@router.post("/api/link/{link_id}/find-discussions")
+async def api_find_discussions(link_id: int):
+    """Manually trigger external discussion lookup for a link."""
+    link_resp = supabase.table("links").select("id, url").eq("id", link_id).execute()
+    if not link_resp.data:
+        raise HTTPException(status_code=404, detail="Link not found")
+    url = link_resp.data[0]["url"]
+    
+    def _run():
+        fetch_and_save_external_discussions(link_id, url)
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    
+    return {"ok": True, "message": "Discussion lookup started"}
+
+
+@router.get("/api/link/{link_id}/discussions")
+async def api_get_discussions(link_id: int):
+    """Get external discussions for a link."""
+    return {"discussions": get_external_discussions(link_id)}
 
 @router.get("/api/links")
 async def api_links_browse(

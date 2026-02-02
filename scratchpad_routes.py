@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from fastapi import BackgroundTasks, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+from scratchpad_api import get_external_discussions, fetch_and_save_external_discussions, check_reverse_lookup
 
 
 def _esc(s: str) -> str:
@@ -290,6 +291,39 @@ label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; fon
 }
 .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
 
+
+/* External Discussions */
+.ext-disc {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; border: 1px solid #334155;
+    border-radius: 8px; margin-bottom: 8px;
+    background: #0f172a; transition: border-color 0.2s;
+}
+.ext-disc:hover { border-color: #475569; }
+.ext-disc .platform-icon {
+    font-size: 20px; min-width: 28px; text-align: center;
+}
+.ext-disc .disc-info { flex: 1; min-width: 0; }
+.ext-disc .disc-title {
+    color: #e2e8f0; font-weight: 500; font-size: 14px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ext-disc .disc-meta {
+    color: #64748b; font-size: 12px; margin-top: 2px;
+}
+.ext-disc .disc-stats {
+    display: flex; gap: 12px; align-items: center;
+    color: #94a3b8; font-size: 13px; font-weight: 500;
+    white-space: nowrap;
+}
+.ext-disc .disc-stats span { display: flex; align-items: center; gap: 4px; }
+.refresh-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: none; border: 1px solid #334155; border-radius: 6px;
+    padding: 4px 12px; color: #64748b; font-size: 12px;
+    cursor: pointer; transition: all 0.15s;
+}
+.refresh-btn:hover { border-color: #60a5fa; color: #60a5fa; text-decoration: none; }
 /* Small pill for cards */
 .pill-sm {
     display: inline-block; background: #312e81; color: #a5b4fc;
@@ -476,6 +510,14 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             print(f"Error finding related: {e}")
             return []
 
+    async def _fetch_discussions_bg(link_id, url):
+        """Background task to fetch external discussions."""
+        import threading
+        def _run():
+            fetch_and_save_external_discussions(link_id, url)
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+
     # ========== GET /add — Check Link page ==========
     @app.get("/add", response_class=HTMLResponse)
     async def page_add_link(message: Optional[str] = None, error: Optional[str] = None):
@@ -484,6 +526,34 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             msgs += f'<div class="msg-ok">{_esc(message)}</div>'
         if error:
             msgs += f'<div class="msg-err">{_esc(error)}</div>'
+        # External Discussions
+        ext_discussions = get_external_discussions(link_id)
+        ext_disc_html = '<div class="card">'
+        ext_disc_html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        ext_disc_html += '<h2 style="margin-bottom:0">External Discussions</h2>'
+        ext_disc_html += f'<form method="POST" action="/link/{link_id}/refresh-discussions" style="margin:0"><button type="submit" class="refresh-btn">&#8635; Refresh</button></form>'
+        ext_disc_html += '</div>'
+        
+        if ext_discussions:
+            for d in ext_discussions:
+                platform = d.get('platform', '')
+                icon = '&#129412;' if platform == 'hackernews' else '&#129302;'  # Y for HN, robot for reddit
+                platform_label = 'Hacker News' if platform == 'hackernews' else f'r/{d.get("subreddit", "reddit")}'
+                d_title = _esc(d.get('title', 'Discussion'))
+                d_url = _esc(d.get('external_url', '#'))
+                d_score = d.get('score', 0) or 0
+                d_comments = d.get('num_comments', 0) or 0
+                ext_disc_html += f'<a href="{d_url}" target="_blank" class="ext-disc" style="text-decoration:none">'
+                ext_disc_html += f'<div class="platform-icon">{icon}</div>'
+                ext_disc_html += f'<div class="disc-info"><div class="disc-title">{d_title}</div>'
+                ext_disc_html += f'<div class="disc-meta">{_esc(platform_label)}</div></div>'
+                ext_disc_html += f'<div class="disc-stats"><span>&#9650; {d_score}</span><span>&#128172; {d_comments}</span></div>'
+                ext_disc_html += '</a>'
+        else:
+            ext_disc_html += '<p style="color:#475569;font-size:13px;padding:4px 0">No external discussions found yet. Click refresh to check HN and Reddit.</p>'
+        
+        ext_disc_html += '</div>'
+
         body = f"""{msgs}
         <div style="padding: 40px 0 20px; text-align: center;">
             <h1 style="font-size: 32px; margin-bottom: 8px;">Check a Link</h1>
@@ -529,6 +599,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
 
         background_tasks.add_task(_ingest_link_content, link_id, url)
         background_tasks.add_task(_ensure_parent_site, url, link_id)
+        background_tasks.add_task(_fetch_discussions_bg, link_id, url)
         return RedirectResponse(url=f"/link/{link_id}?message=Link+saved!+Content+being+extracted...", status_code=303)
 
     # ========== GET /link/{id} — Detail page ==========
@@ -626,6 +697,34 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         if not related_html:
             related_html = '<p style="color:#475569;font-size:13px">No related links found.</p>'
 
+        # External Discussions
+        ext_discussions = get_external_discussions(link_id)
+        ext_disc_html = '<div class="card">'
+        ext_disc_html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+        ext_disc_html += '<h2 style="margin-bottom:0">External Discussions</h2>'
+        ext_disc_html += f'<form method="POST" action="/link/{link_id}/refresh-discussions" style="margin:0"><button type="submit" class="refresh-btn">&#8635; Refresh</button></form>'
+        ext_disc_html += '</div>'
+        
+        if ext_discussions:
+            for d in ext_discussions:
+                platform = d.get('platform', '')
+                icon = '&#129412;' if platform == 'hackernews' else '&#129302;'  # Y for HN, robot for reddit
+                platform_label = 'Hacker News' if platform == 'hackernews' else f'r/{d.get("subreddit", "reddit")}'
+                d_title = _esc(d.get('title', 'Discussion'))
+                d_url = _esc(d.get('external_url', '#'))
+                d_score = d.get('score', 0) or 0
+                d_comments = d.get('num_comments', 0) or 0
+                ext_disc_html += f'<a href="{d_url}" target="_blank" class="ext-disc" style="text-decoration:none">'
+                ext_disc_html += f'<div class="platform-icon">{icon}</div>'
+                ext_disc_html += f'<div class="disc-info"><div class="disc-title">{d_title}</div>'
+                ext_disc_html += f'<div class="disc-meta">{_esc(platform_label)}</div></div>'
+                ext_disc_html += f'<div class="disc-stats"><span>&#9650; {d_score}</span><span>&#128172; {d_comments}</span></div>'
+                ext_disc_html += '</a>'
+        else:
+            ext_disc_html += '<p style="color:#475569;font-size:13px;padding:4px 0">No external discussions found yet. Click refresh to check HN and Reddit.</p>'
+        
+        ext_disc_html += '</div>'
+
         body = f"""{msgs}
         <div class="card" style="position:relative">
             <div style="position:absolute;top:24px;right:24px">
@@ -653,6 +752,8 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         <div class="card">
             {comments_html}
         </div>
+
+        {ext_disc_html}
 
         <div class="card">
             <h2>Related Links</h2>
@@ -692,6 +793,15 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             current = link_resp.data[0].get('direct_score', 0) or 0
             supabase.table('links').update({'direct_score': current + 1}).eq('id', link_id).execute()
         return RedirectResponse(url=f"/link/{link_id}", status_code=303)
+
+    # ========== POST /link/{id}/refresh-discussions ==========
+    @app.post("/link/{link_id}/refresh-discussions")
+    async def page_refresh_discussions(link_id: int, background_tasks: BackgroundTasks):
+        link_resp = supabase.table('links').select('url').eq('id', link_id).execute()
+        if link_resp.data:
+            url = link_resp.data[0]['url']
+            background_tasks.add_task(_fetch_discussions_bg, link_id, url)
+        return RedirectResponse(url=f"/link/{link_id}?message=Checking+HN+and+Reddit...", status_code=303)
 
     # ========== GET /link/{id}/remove-tag/{slug} ==========
     @app.get("/link/{link_id}/remove-tag/{slug}")

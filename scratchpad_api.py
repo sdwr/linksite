@@ -762,18 +762,18 @@ async def api_links_browse(
 @router.get("/api/random")
 async def api_random_link():
     """Pick a random link and redirect to its detail page."""
-    count_resp = supabase.table("links").select("id", count="exact").neq("source", "auto-parent").execute()
+    count_resp = supabase.table("links").select("id", count="exact").neq("source", "auto-parent").neq("source", "discussion-ref").execute()
     total = count_resp.count or 0
     if total == 0:
         return RedirectResponse(url="/browse", status_code=302)
     rand_offset = random.randint(0, total - 1)
-    resp = supabase.table("links").select("id").neq("source", "auto-parent").order(
+    resp = supabase.table("links").select("id").neq("source", "auto-parent").neq("source", "discussion-ref").order(
         "id", desc=False
     ).range(rand_offset, rand_offset).execute()
     if resp.data:
         return RedirectResponse(url=f"/link/{resp.data[0]['id']}", status_code=302)
     # Fallback
-    resp = supabase.table("links").select("id").neq("source", "auto-parent").order(
+    resp = supabase.table("links").select("id").neq("source", "auto-parent").neq("source", "discussion-ref").order(
         "id", desc=False
     ).limit(100).execute()
     if resp.data:

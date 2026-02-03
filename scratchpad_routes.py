@@ -11,7 +11,7 @@ import json as _json
 from typing import Optional, List
 from urllib.parse import urlparse
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks, Form, HTTPException
+from fastapi import BackgroundTasks, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from scratchpad_api import get_external_discussions, fetch_and_save_external_discussions, check_reverse_lookup
 
@@ -410,6 +410,18 @@ label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; fon
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
 }
+/* User badge in topbar */
+.user-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #312e81; color: #a5b4fc; padding: 4px 12px;
+    border-radius: 14px; font-size: 13px; font-weight: 500;
+    white-space: nowrap;
+}
+/* Commenting-as label */
+.commenting-as {
+    font-size: 12px; color: #64748b; margin-bottom: 6px;
+}
+.commenting-as strong { color: #a5b4fc; }
 """
 
 
@@ -418,6 +430,7 @@ def dark_nav():
         <a href="/browse" class="brand">&#128279; Linksite</a>
         <a href="/browse">Browse</a>
         <a href="/add">Check Link</a>
+        <span id="user-badge" class="user-badge" style="display:none"></span>
     </div>"""
 
 
@@ -497,6 +510,18 @@ document.addEventListener('click',function(e){
     if(a&&_cachedRandomUrl){e.preventDefault();var u=_cachedRandomUrl;_cachedRandomUrl=null;
     document.getElementById('loader').className='page-loader loading';window.location.href=u;_preloadRandom();}
 });
+
+// --- User badge + commenting-as ---
+fetch('/api/me').then(function(r){return r.json();}).then(function(d){
+    if(d&&d.display_name){
+        var b=document.getElementById('user-badge');
+        if(b){b.innerHTML='&#128100; '+_esc(d.display_name);b.style.display='';}
+        var ca=document.getElementById('commenting-as');
+        if(ca){ca.innerHTML='Commenting as <strong>'+_esc(d.display_name)+'</strong>';}
+        var ai=document.getElementById('comment-author');
+        if(ai){ai.value=d.display_name;}
+    }
+}).catch(function(){});
 """
 
 
@@ -767,12 +792,13 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             parent_html = f'<div style="margin-bottom:12px"><span style="color:#64748b;font-size:13px">Part of:</span> <a href="/link/{p["id"]}">{_esc(p.get("title") or p.get("url"))}</a></div>'
 
         # --- Comments section: just the input form + a placeholder for lazy-loaded notes ---
-        comments_shell = f'''<div class="comment-input">
+        comments_shell = f'''<div class="commenting-as" id="commenting-as"></div>
+        <div class="comment-input">
             <form method="POST" action="/link/{link_id}/add-note" style="display:flex;gap:10px;width:100%">
                 <textarea name="text" placeholder="Add a comment..." required rows="1"
                     onfocus="this.rows=3" onblur="if(!this.value)this.rows=1"
                     onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){{event.preventDefault();this.form.submit()}}"></textarea>
-                <input type="hidden" name="author" value="anon">
+                <input type="hidden" name="author" value="anon" id="comment-author">
             </form>
         </div>
         <div id="notes-container"><div class="lazy-loader">Loading comments&hellip;</div></div>'''
@@ -845,7 +871,7 @@ fetch('/api/link/'+LID+'/notes').then(function(r){return r.json();}).then(functi
         '<span class="vote-score">&middot;</span>'+
         '<button class="vote-btn down" title="Downvote">&#9660;</button>'+
         '</div><div class="comment-body">'+
-        '<div class="comment-meta"><strong>'+_esc(n.author||'anonymous')+'</strong> &middot; '+_ago(n.created_at)+'</div>'+
+        '<div class="comment-meta"><strong>'+_esc(n.display_name||n.author||'anonymous')+'</strong> &middot; '+_ago(n.created_at)+'</div>'+
         '<div class="comment-text">'+_esc(n.text||'')+'</div></div></div>';
     });}
     c.innerHTML=h;
@@ -905,9 +931,19 @@ function _toggleDisc(){
 
     # ========== POST /link/{id}/add-note ==========
     @app.post("/link/{link_id}/add-note")
-    async def page_add_note(link_id: int, text: str = Form(...), author: str = Form("anon")):
+    async def page_add_note(link_id: int, request: Request, text: str = Form(...), author: str = Form("anon")):
         author = author.strip() or "anon"
-        supabase.table('notes').insert({'link_id': link_id, 'author': author, 'text': text.strip()}).execute()
+        insert_data = {'link_id': link_id, 'author': author, 'text': text.strip()}
+        # Attach user_id from middleware
+        user_id = getattr(getattr(request, 'state', None), 'user_id', None)
+        if user_id:
+            insert_data['user_id'] = user_id
+            # Use display_name as author if default
+            if author in ('anon', 'anonymous'):
+                display_name = getattr(request.state, 'display_name', None)
+                if display_name and display_name != 'Anonymous':
+                    insert_data['author'] = display_name
+        supabase.table('notes').insert(insert_data).execute()
         return RedirectResponse(url=f"/link/{link_id}", status_code=303)
 
     # ========== POST /link/{id}/add-tags ==========
@@ -1055,7 +1091,7 @@ fetch(apiUrl).then(function(r){return r.json();}).then(function(data){
             '<div class="card-meta"><span>&#128172; '+nc+'</span><span>&#11088; '+sc+'</span></div>'+
             '</div></a>';
     });
-    c.innerHTML='<div class="grid">'+h+'</div>';
+    c.innerHTML=h;
 }).catch(function(){
     document.getElementById('links-grid').innerHTML='<div class="msg-err">Failed to load links. <a href="/browse">Retry</a></div>';
 });

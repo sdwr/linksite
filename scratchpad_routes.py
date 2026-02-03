@@ -1045,9 +1045,12 @@ fetch('/api/link/'+LID+'/discussions').then(function(r){return r.json();}).then(
         var icon=d.platform==='reddit'?'&#129302;':'&#129412;';
         var iconColor=d.platform==='reddit'?'#ff4500':'#ff6600';
         var meta=d.platform==='reddit'?'r/'+_esc(d.subreddit||'reddit'):'Hacker News';
-        h+='<a href="'+_esc(d.external_url||'#')+'" target="_blank" class="ext-disc'+cls+'"'+hide+' style="text-decoration:none">'+
+        var discUrl=d.internal_link_id?'/link/'+d.internal_link_id:_esc(d.external_url||'#');
+        var discTarget=d.internal_link_id?'':'target="_blank"';
+        var discTitle=d.title||'Discussion';if(discTitle.length>80)discTitle=discTitle.substring(0,77)+'...';
+        h+='<a href="'+discUrl+'" '+discTarget+' class="ext-disc'+cls+'"'+hide+' style="text-decoration:none">'+
             '<div class="platform-icon" style="color:'+iconColor+'">'+icon+'</div>'+
-            '<div class="disc-info"><div class="disc-title">'+_esc(d.title||'Discussion')+'</div>'+
+            '<div class="disc-info"><div class="disc-title">'+_esc(discTitle)+'</div>'+
             '<div class="disc-meta">'+meta+'</div></div>'+
             '<div class="disc-stats"><span>&#9650; '+(d.score||0)+'</span><span>&#128172; '+(d.num_comments||0)+'</span></div></a>';
     });

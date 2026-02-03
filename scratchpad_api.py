@@ -38,15 +38,41 @@ _reddit_token_cache = {
     "expires_at": 0,
 }
 
+def _load_reddit_stats_from_db():
+    """Load persistent Reddit API stats from DB."""
+    try:
+        resp = supabase.table("global_state").select("reddit_api_stats").eq("id", 1).execute()
+        if resp.data and resp.data[0].get("reddit_api_stats"):
+            return resp.data[0]["reddit_api_stats"]
+    except Exception as e:
+        print(f"[RedditStats] Load error: {e}")
+    return {}
+
+def _save_reddit_stats_to_db():
+    """Save Reddit API stats to DB."""
+    try:
+        stats_to_save = {
+            "total_calls": _reddit_stats["total_calls"],
+            "searches": _reddit_stats["searches"],
+            "resolves": _reddit_stats["resolves"],
+            "token_refreshes": _reddit_stats["token_refreshes"],
+        }
+        supabase.table("global_state").update({"reddit_api_stats": stats_to_save}).eq("id", 1).execute()
+    except Exception as e:
+        print(f"[RedditStats] Save error: {e}")
+
+# Load persisted stats on startup
+_persisted_stats = _load_reddit_stats_from_db()
+
 _reddit_stats = {
     "last_call_time": 0,
-    "total_calls": 0,
+    "total_calls": _persisted_stats.get("total_calls", 0),
     "last_error": None,
     "last_error_time": None,
-    "token_refreshes": 0,
+    "token_refreshes": _persisted_stats.get("token_refreshes", 0),
     "last_search_time": None,
-    "searches": 0,
-    "resolves": 0,
+    "searches": _persisted_stats.get("searches", 0),
+    "resolves": _persisted_stats.get("resolves", 0),
     "started_at": _time.time(),
 }
 
@@ -128,7 +154,7 @@ def _reddit_api_get(path, params=None):
             follow_redirects=True,
         )
         _reddit_stats["last_call_time"] = _time.time()
-        _reddit_stats["total_calls"] += 1
+        _reddit_stats["total_calls"] += 1; _save_reddit_stats_to_db()
 
         if resp.status_code == 200:
             _reddit_stats["last_error"] = None
@@ -150,7 +176,7 @@ def _reddit_api_get(path, params=None):
                     follow_redirects=True,
                 )
                 _reddit_stats["last_call_time"] = _time.time()
-                _reddit_stats["total_calls"] += 1
+                _reddit_stats["total_calls"] += 1; _save_reddit_stats_to_db()
                 if resp.status_code == 200:
                     _reddit_stats["last_error"] = None
                     return resp.json()
@@ -604,12 +630,28 @@ def save_external_discussions(link_id: int, discussions: list):
 
 
 def get_external_discussions(link_id: int) -> list:
-    """Fetch saved external discussions for a link."""
+    """Fetch saved external discussions for a link, with internal link lookup."""
     try:
         resp = supabase.table("external_discussions").select("*").eq(
             "link_id", link_id
         ).order("num_comments", desc=True).execute()
-        return resp.data or []
+        discussions = resp.data or []
+        
+        # Check if any external_url exists as a link in our DB
+        if discussions:
+            external_urls = [d.get("external_url") for d in discussions if d.get("external_url")]
+            if external_urls:
+                # Batch lookup all URLs
+                links_resp = supabase.table("links").select("id, url").in_("url", external_urls).execute()
+                url_to_id = {l["url"]: l["id"] for l in (links_resp.data or [])}
+                
+                # Add internal_link_id to discussions where we have the URL
+                for d in discussions:
+                    ext_url = d.get("external_url", "")
+                    if ext_url in url_to_id:
+                        d["internal_link_id"] = url_to_id[ext_url]
+        
+        return discussions
     except Exception as e:
         print(f"[ExtDisc] Fetch error for link {link_id}: {e}")
         return []

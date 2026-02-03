@@ -28,7 +28,7 @@ from scratchpad_routes import register_scratchpad_routes
 from user_utils import generate_display_name
 
 import ingest as ingest_module
-from scratchpad_api import router as scratchpad_router, init as scratchpad_init, normalize_url
+from scratchpad_api import router as scratchpad_router, init as scratchpad_init, normalize_url, get_reddit_api_status
 from ai_routes import create_ai_router
 
 load_dotenv()
@@ -1130,12 +1130,61 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
             {weights_html if weights_html else '<span style="color:#94a3b8">No weights configured</span>'}
         </div>"""
 
+
+        # --- Reddit API Status ---
+        try:
+            reddit_status = get_reddit_api_status()
+            r_configured = reddit_status.get("configured", False)
+            r_token_valid = reddit_status.get("token_valid", False)
+            r_total_calls = reddit_status.get("total_calls", 0)
+            r_searches = reddit_status.get("searches", 0)
+            r_resolves = reddit_status.get("resolves", 0)
+            r_refreshes = reddit_status.get("token_refreshes", 0)
+            r_last_error = _esc(reddit_status.get("last_error") or "None")
+            r_avg_rpm = reddit_status.get("avg_rpm", 0)
+            r_token_exp = reddit_status.get("token_expires_in_sec", 0)
+            r_uptime = reddit_status.get("uptime_sec", 0)
+            r_last_search = reddit_status.get("last_search_time")
+
+            r_status_color = "#16a34a" if r_token_valid else ("#f59e0b" if r_configured else "#dc2626")
+            r_status_text = "Authenticated" if r_token_valid else ("Configured (no token)" if r_configured else "Not Configured")
+
+            r_last_search_str = "-"
+            if r_last_search:
+                import time as _admin_time
+                ago = _admin_time.time() - r_last_search
+                if ago < 60:
+                    r_last_search_str = f"{int(ago)}s ago"
+                elif ago < 3600:
+                    r_last_search_str = f"{int(ago//60)}m ago"
+                else:
+                    r_last_search_str = f"{int(ago//3600)}h ago"
+
+            r_uptime_str = f"{r_uptime // 3600}h {(r_uptime % 3600) // 60}m"
+
+            reddit_html = f"""<div class="card">
+                <h2>&#129302; Reddit API</h2>
+                <div class="kv"><span class="label">Status</span><span style="color:{r_status_color};font-weight:700">{r_status_text}</span></div>
+                <div class="kv"><span class="label">Token Expires</span><span>{r_token_exp // 3600}h {(r_token_exp % 3600) // 60}m</span></div>
+                <div class="kv"><span class="label">Total API Calls</span><span>{r_total_calls}</span></div>
+                <div class="kv"><span class="label">Searches / Resolves</span><span>{r_searches} / {r_resolves}</span></div>
+                <div class="kv"><span class="label">Token Refreshes</span><span>{r_refreshes}</span></div>
+                <div class="kv"><span class="label">Avg RPM</span><span>{r_avg_rpm:.1f}</span></div>
+                <div class="kv"><span class="label">Last Search</span><span>{r_last_search_str}</span></div>
+                <div class="kv"><span class="label">Last Error</span><span style="font-size:12px;color:{'#dc2626' if r_last_error != 'None' else '#94a3b8'}">{r_last_error}</span></div>
+                <div class="kv"><span class="label">Uptime</span><span>{r_uptime_str}</span></div>
+            </div>"""
+        except Exception as e:
+            reddit_html = f'<div class="card"><h2>&#129302; Reddit API</h2><div class="msg-err">Error loading status: {_esc(str(e))}</div></div>'
+
+
         # --- Assemble ---
         body = _messages(message, error)
         body += director_html
         body += '<div class="grid-2">'
         body += feeds_html
         body += weights_card
+        body += reddit_html
         body += '</div>'
 
         return HTMLResponse(_page("Admin", body))

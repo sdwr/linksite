@@ -9,11 +9,13 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone
 import random
+import os
 from urllib.parse import urlparse
 import math
 import threading
 import httpx
 from datetime import datetime as dt_cls
+import time as _time
 
 router = APIRouter()
 
@@ -25,6 +27,182 @@ def init(sb_client, ingest_mod):
     global supabase, ingest_module
     supabase = sb_client
     ingest_module = ingest_mod
+
+
+# ============================================================
+# Reddit OAuth API
+# ============================================================
+
+_reddit_token_cache = {
+    "access_token": None,
+    "expires_at": 0,
+}
+
+_reddit_stats = {
+    "last_call_time": 0,
+    "total_calls": 0,
+    "last_error": None,
+    "last_error_time": None,
+    "token_refreshes": 0,
+    "last_search_time": None,
+    "searches": 0,
+    "resolves": 0,
+    "started_at": _time.time(),
+}
+
+_REDDIT_MIN_INTERVAL = 1.0  # min seconds between Reddit API calls
+
+
+def _get_reddit_user_agent():
+    username = os.environ.get("REDDIT_USERNAME", "AMA_ABOUT_DAN_JUICE")
+    return f"LinkCompass:v1.0 (by /u/{username})"
+
+
+def _get_reddit_token():
+    """Get a valid Reddit OAuth token, refreshing if needed."""
+    now = _time.time()
+    if _reddit_token_cache["access_token"] and now < _reddit_token_cache["expires_at"] - 60:
+        return _reddit_token_cache["access_token"]
+
+    client_id = os.environ.get("REDDIT_CLIENT_ID", "")
+    client_secret = os.environ.get("REDDIT_CLIENT_SECRET", "")
+
+    if not client_id or not client_secret:
+        _reddit_stats["last_error"] = "Missing REDDIT_CLIENT_ID or REDDIT_CLIENT_SECRET env vars"
+        _reddit_stats["last_error_time"] = _time.time()
+        print("[Reddit] Missing credentials in env")
+        return None
+
+    try:
+        resp = httpx.post(
+            "https://www.reddit.com/api/v1/access_token",
+            auth=(client_id, client_secret),
+            data={"grant_type": "client_credentials"},
+            headers={"User-Agent": _get_reddit_user_agent()},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            _reddit_token_cache["access_token"] = data["access_token"]
+            _reddit_token_cache["expires_at"] = now + data.get("expires_in", 86400)
+            _reddit_stats["token_refreshes"] += 1
+            _reddit_stats["last_error"] = None
+            print(f"[Reddit] Token refreshed, expires in {data.get('expires_in', '?')}s")
+            return data["access_token"]
+        else:
+            err = f"Token request failed: HTTP {resp.status_code}"
+            _reddit_stats["last_error"] = err
+            _reddit_stats["last_error_time"] = _time.time()
+            print(f"[Reddit] {err} — {resp.text[:200]}")
+    except Exception as e:
+        _reddit_stats["last_error"] = str(e)
+        _reddit_stats["last_error_time"] = _time.time()
+        print(f"[Reddit] Token error: {e}")
+
+    return None
+
+
+def _reddit_api_get(path, params=None):
+    """Make an authenticated GET to Reddit OAuth API with rate limiting."""
+    # Rate limit: wait if last call was too recent
+    now = _time.time()
+    elapsed = now - _reddit_stats["last_call_time"]
+    if elapsed < _REDDIT_MIN_INTERVAL:
+        _time.sleep(_REDDIT_MIN_INTERVAL - elapsed)
+
+    token = _get_reddit_token()
+    if not token:
+        return None
+
+    ua = _get_reddit_user_agent()
+
+    try:
+        resp = httpx.get(
+            f"https://oauth.reddit.com{path}",
+            params=params,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": ua,
+            },
+            timeout=10,
+            follow_redirects=True,
+        )
+        _reddit_stats["last_call_time"] = _time.time()
+        _reddit_stats["total_calls"] += 1
+
+        if resp.status_code == 200:
+            _reddit_stats["last_error"] = None
+            return resp.json()
+        elif resp.status_code == 401:
+            # Token expired — clear cache and retry once
+            _reddit_token_cache["access_token"] = None
+            _reddit_token_cache["expires_at"] = 0
+            token = _get_reddit_token()
+            if token:
+                resp = httpx.get(
+                    f"https://oauth.reddit.com{path}",
+                    params=params,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "User-Agent": ua,
+                    },
+                    timeout=10,
+                    follow_redirects=True,
+                )
+                _reddit_stats["last_call_time"] = _time.time()
+                _reddit_stats["total_calls"] += 1
+                if resp.status_code == 200:
+                    _reddit_stats["last_error"] = None
+                    return resp.json()
+            err = f"Auth failed after retry: HTTP {resp.status_code}"
+            _reddit_stats["last_error"] = err
+            _reddit_stats["last_error_time"] = _time.time()
+            print(f"[Reddit] {err}")
+        else:
+            err = f"API error: HTTP {resp.status_code}"
+            _reddit_stats["last_error"] = err
+            _reddit_stats["last_error_time"] = _time.time()
+            print(f"[Reddit] {err} — {resp.text[:200]}")
+    except Exception as e:
+        _reddit_stats["last_error"] = str(e)
+        _reddit_stats["last_error_time"] = _time.time()
+        print(f"[Reddit] API request error: {e}")
+
+    return None
+
+
+def get_reddit_api_status():
+    """Return Reddit API status dict for admin display."""
+    now = _time.time()
+    uptime = now - _reddit_stats["started_at"]
+    token_valid = (
+        _reddit_token_cache["access_token"] is not None
+        and now < _reddit_token_cache["expires_at"]
+    )
+    token_expires_in = max(0, _reddit_token_cache["expires_at"] - now) if token_valid else 0
+
+    has_creds = bool(
+        os.environ.get("REDDIT_CLIENT_ID") and os.environ.get("REDDIT_CLIENT_SECRET")
+    )
+
+    # Calculate RPM over last 60 seconds (approximate)
+    rpm = (_reddit_stats["total_calls"] / uptime * 60) if uptime > 0 else 0
+
+    return {
+        "configured": has_creds,
+        "token_valid": token_valid,
+        "token_expires_in_sec": round(token_expires_in),
+        "total_calls": _reddit_stats["total_calls"],
+        "searches": _reddit_stats["searches"],
+        "resolves": _reddit_stats["resolves"],
+        "token_refreshes": _reddit_stats["token_refreshes"],
+        "last_error": _reddit_stats["last_error"],
+        "last_error_time": _reddit_stats["last_error_time"],
+        "last_call_time": _reddit_stats["last_call_time"],
+        "last_search_time": _reddit_stats["last_search_time"],
+        "avg_rpm": round(rpm, 2),
+        "uptime_sec": round(uptime),
+    }
 
 
 # --- Models ---
@@ -315,7 +493,7 @@ def normalize_url(url: str) -> str:
 # --- External Discussions ---
 
 def find_external_discussions(url: str) -> list:
-    """Query HN Algolia and Reddit for discussions about this URL."""
+    """Query HN Algolia and Reddit (OAuth) for discussions about this URL."""
     results = []
     
     # Strip scheme for better search matching
@@ -356,25 +534,27 @@ def find_external_discussions(url: str) -> list:
     except Exception as e:
         print(f"[ExtDisc] HN error for {url}: {e}")
     
-    # 2. Reddit
+    # 2. Reddit via OAuth API
     try:
-        resp = httpx.get(
-            "https://www.reddit.com/search.json",
-            params={"q": f"url:{url}", "sort": "top", "limit": 20},
-            headers={"User-Agent": "Linksite/1.0 (external discussion finder)"},
-            timeout=10,
-            follow_redirects=True,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
+        _reddit_stats["last_search_time"] = _time.time()
+        _reddit_stats["searches"] += 1
+
+        data = _reddit_api_get("/search", params={
+            "q": f"url:{url}",
+            "sort": "top",
+            "limit": 20,
+            "type": "link",
+        })
+        if data:
             children = data.get("data", {}).get("children", [])
             for child in children:
                 post = child.get("data", {})
                 ext_created = None
                 if post.get("created_utc"):
                     try:
-                        from datetime import datetime, timezone
-                        ext_created = datetime.fromtimestamp(post["created_utc"], tz=timezone.utc).isoformat()
+                        ext_created = datetime.fromtimestamp(
+                            post["created_utc"], tz=timezone.utc
+                        ).isoformat()
                     except Exception:
                         pass
                 results.append({
@@ -387,9 +567,9 @@ def find_external_discussions(url: str) -> list:
                     "subreddit": post.get("subreddit", ""),
                     "external_created_at": ext_created,
                 })
-            print(f"[ExtDisc] Reddit returned {len(children)} results for {url}")
+            print(f"[ExtDisc] Reddit OAuth returned {len(children)} results for {url}")
         else:
-            print(f"[ExtDisc] Reddit returned status {resp.status_code} for {url}")
+            print(f"[ExtDisc] Reddit OAuth returned no data for {url}")
     except Exception as e:
         print(f"[ExtDisc] Reddit error for {url}: {e}")
     
@@ -463,11 +643,34 @@ def resolve_hn_url(hn_url: str) -> str:
 
 
 def resolve_reddit_url(reddit_url: str) -> str:
-    """Given a Reddit post URL, find the original URL it links to."""
+    """Given a Reddit post URL, find the original URL it links to (via OAuth API)."""
     try:
+        _reddit_stats["resolves"] += 1
+
+        # Extract the Reddit post path from the URL
+        parsed = urlparse(reddit_url)
+        path = parsed.path.rstrip("/")
+        if not path:
+            return None
+
+        # Use OAuth API to get post details
+        # The path should be like /r/subreddit/comments/id/title
+        data = _reddit_api_get(path + ".json")
+        if data and isinstance(data, list) and len(data) > 0:
+            children = data[0].get("data", {}).get("children", [])
+            if children:
+                post_data = children[0].get("data", {})
+                url = post_data.get("url", "")
+                # Skip self posts and reddit links
+                if url and not url.startswith("https://www.reddit.com") and not post_data.get("is_self"):
+                    print(f"[ExtDisc] Reddit resolve: {reddit_url} -> {url}")
+                    return url
+        
+        # Fallback: try the public .json endpoint (no auth)
+        print(f"[ExtDisc] Reddit OAuth resolve returned no URL, trying public fallback for {reddit_url}")
         resp = httpx.get(
             reddit_url + ".json",
-            headers={"User-Agent": "Linksite/1.0"},
+            headers={"User-Agent": _get_reddit_user_agent()},
             timeout=10,
             follow_redirects=True,
         )
@@ -476,10 +679,11 @@ def resolve_reddit_url(reddit_url: str) -> str:
             if isinstance(data, list) and len(data) > 0:
                 post_data = data[0].get("data", {}).get("children", [{}])[0].get("data", {})
                 url = post_data.get("url", "")
-                # Skip self posts and reddit links
                 if url and not url.startswith("https://www.reddit.com") and not post_data.get("is_self"):
                     return url
     except Exception as e:
+        _reddit_stats["last_error"] = f"Resolve error: {e}"
+        _reddit_stats["last_error_time"] = _time.time()
         print(f"[ExtDisc] Reddit resolve error: {e}")
     return None
 
@@ -517,14 +721,33 @@ def check_reverse_lookup(url: str, link_id: int):
             supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
             print(f"[ExtDisc] Reverse: linked {link_id} -> existing {original_link_id} ({original_url})")
         else:
-            # Create the original link
-            resp = supabase.table("links").insert({
-                "url": original_url,
-                "source": "reverse-lookup",
-                "submitted_by": "auto",
-            }).execute()
-            if resp.data:
-                original_link_id = resp.data[0]["id"]
+            # Create the original link (handle race condition / normalization mismatch)
+            try:
+                resp = supabase.table("links").insert({
+                    "url": original_url,
+                    "source": "reverse-lookup",
+                    "submitted_by": "auto",
+                }).execute()
+                if resp.data:
+                    original_link_id = resp.data[0]["id"]
+                else:
+                    return
+            except Exception as insert_err:
+                # Likely a unique constraint violation - URL exists with slightly different normalization
+                print(f"[ExtDisc] Insert failed (probably dup), retrying lookup: {insert_err}")
+                retry = supabase.table("links").select("id").eq("url", original_url).execute()
+                if not retry.data:
+                    # Try with/without trailing slash
+                    alt_url = original_url.rstrip('/') + '/' if not original_url.endswith('/') else original_url.rstrip('/')
+                    retry = supabase.table("links").select("id").eq("url", alt_url).execute()
+                if retry.data:
+                    original_link_id = retry.data[0]["id"]
+                    supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
+                    print(f"[ExtDisc] Reverse: linked {link_id} -> existing {original_link_id} (found on retry)")
+                else:
+                    print(f"[ExtDisc] Could not find or create link for {original_url}")
+                return
+            if original_link_id:
                 # Set parent
                 supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
                 print(f"[ExtDisc] Reverse: created {original_link_id} ({original_url}) as parent of {link_id}")
@@ -777,6 +1000,13 @@ async def api_get_discussions(link_id: int):
     """Get external discussions for a link."""
     return {"discussions": get_external_discussions(link_id)}
 
+
+@router.get("/api/reddit-status")
+async def api_reddit_status():
+    """Get Reddit API status for admin monitoring."""
+    return get_reddit_api_status()
+
+
 @router.get("/api/links")
 async def api_links_browse(
     tag: Optional[str] = None,
@@ -855,7 +1085,6 @@ async def api_links_browse(
     return {"links": links, "total": resp.count or 0}
 
 # --- Cached random link IDs ---
-import time as _time
 
 _random_ids_cache = {"ids": [], "ts": 0}
 _RANDOM_CACHE_TTL = 60  # seconds

@@ -76,6 +76,22 @@ def normalize_url(url: str) -> str:
     return result
 
 
+def extract_youtube_id(url: str) -> str:
+    """Extract YouTube video ID from various URL formats. Returns empty string if not YouTube."""
+    if not url:
+        return ""
+    m = re.search(
+        r'(?:youtube\.com/watch\?.*v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})',
+        url
+    )
+    return m.group(1) if m else ""
+
+
+def is_bluesky_url(url: str) -> bool:
+    """Check if URL is a Bluesky post."""
+    return bool(url and 'bsky.app/profile/' in url and '/post/' in url)
+
+
 def get_or_create_tag(supabase, slug: str) -> dict:
     slug = slug.strip().lower().replace(' ', '-')
     slug = re.sub(r'[^a-z0-9\-]', '', slug)
@@ -160,6 +176,22 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .img-preview {
     max-width: 100%; max-height: 300px; border-radius: 8px;
     margin: 12px 0; object-fit: cover;
+}
+
+/* YouTube embed responsive container */
+.yt-embed-wrap {
+    position: relative; width: 100%; padding-bottom: 56.25%;
+    margin: 12px 0; border-radius: 8px; overflow: hidden;
+    background: #000;
+}
+.yt-embed-wrap iframe {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;
+}
+
+/* Bluesky embed container */
+.bsky-embed-wrap {
+    margin: 12px 0; border-radius: 8px; overflow: hidden;
+    background: #1e293b; min-height: 80px;
 }
 
 /* Comments (reddit-style) */
@@ -422,6 +454,21 @@ label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; fon
     font-size: 12px; color: #64748b; margin-bottom: 6px;
 }
 .commenting-as strong { color: #a5b4fc; }
+
+/* Reddit Embeds */
+.reddit-embed-wrap {
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+.reddit-embed-wrap blockquote {
+    margin: 0 !important;
+    border: 1px solid #334155 !important;
+    border-radius: 8px;
+}
+.reddit-embed-wrap iframe {
+    border-radius: 8px !important;
+}
 """
 
 
@@ -542,6 +589,80 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                     'source': 'youtube',
                 }
                 text_for_vector = f"{data.get('title', '')}. {data.get('transcript', '')}"
+            elif is_bluesky_url(url):
+                # Bluesky post — try oEmbed for metadata + thumbnail
+                update = {'source': 'bluesky'}
+                text_for_vector = ''
+                try:
+                    import httpx as _hx
+                    async with _hx.AsyncClient() as client:
+                        oembed_resp = await client.get(
+                            'https://embed.bsky.app/oembed',
+                            params={'url': url, 'format': 'json'},
+                            timeout=10
+                        )
+                        if oembed_resp.status_code == 200:
+                            oembed = oembed_resp.json()
+                            if oembed.get('author_name'):
+                                update['title'] = f"Post by {oembed['author_name']}"
+                                text_for_vector = f"Bluesky post by {oembed['author_name']}."
+                            # Try to extract thumbnail from oEmbed HTML
+                            html_str = oembed.get('html', '')
+                            img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html_str)
+                            if img_match:
+                                update['og_image_url'] = img_match.group(1)
+                except Exception as e:
+                    print(f"[Ingest] Bluesky oEmbed failed for {url}: {e}")
+                # Also try the AT Protocol public API for richer data
+                try:
+                    import httpx as _hx
+                    # Parse handle and rkey from URL
+                    bsky_match = re.search(r'bsky\.app/profile/([^/]+)/post/([^/?#]+)', url)
+                    if bsky_match:
+                        handle, rkey = bsky_match.group(1), bsky_match.group(2)
+                        async with _hx.AsyncClient() as client:
+                            # Resolve handle to DID if needed
+                            if not handle.startswith('did:'):
+                                resolve = await client.get(
+                                    f'https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle',
+                                    params={'handle': handle}, timeout=10
+                                )
+                                if resolve.status_code == 200:
+                                    did = resolve.json().get('did', '')
+                                else:
+                                    did = handle
+                            else:
+                                did = handle
+                            # Fetch the post
+                            post_resp = await client.get(
+                                'https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread',
+                                params={'uri': f'at://{did}/app.bsky.feed.post/{rkey}', 'depth': 0},
+                                timeout=10
+                            )
+                            if post_resp.status_code == 200:
+                                thread = post_resp.json()
+                                post = thread.get('thread', {}).get('post', {})
+                                record = post.get('record', {})
+                                author = post.get('author', {})
+                                post_text = record.get('text', '')
+                                display_name = author.get('displayName', author.get('handle', ''))
+                                if post_text:
+                                    update['description'] = post_text[:5000]
+                                    text_for_vector = f"Bluesky post by {display_name}: {post_text}"
+                                if display_name and not update.get('title'):
+                                    update['title'] = f"Post by {display_name}"
+                                # Thumbnail: prefer embed image > author avatar
+                                embed = post.get('embed', {})
+                                embed_images = embed.get('images', [])
+                                if embed_images and not update.get('og_image_url'):
+                                    update['og_image_url'] = embed_images[0].get('fullsize', '') or embed_images[0].get('thumb', '')
+                                elif embed.get('external', {}).get('thumb') and not update.get('og_image_url'):
+                                    update['og_image_url'] = embed['external']['thumb']
+                                elif author.get('avatar') and not update.get('og_image_url'):
+                                    update['og_image_url'] = author['avatar']
+                except Exception as e:
+                    print(f"[Ingest] Bluesky AT Proto failed for {url}: {e}")
+                data = update  # for consistency
             else:
                 data = extractor.extract_website_content(url)
                 update = {
@@ -653,10 +774,11 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             return []
 
     async def _fetch_discussions_bg(link_id, url):
-        """Background task to fetch external discussions."""
+        """Background task to fetch external discussions + reverse lookup."""
         import threading
         def _run():
             fetch_and_save_external_discussions(link_id, url)
+            check_reverse_lookup(url, link_id)
         t = threading.Thread(target=_run, daemon=True)
         t.start()
 
@@ -714,7 +836,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         background_tasks.add_task(_ingest_link_content, link_id, url)
         background_tasks.add_task(_ensure_parent_site, url, link_id)
         background_tasks.add_task(_fetch_discussions_bg, link_id, url)
-        return RedirectResponse(url=f"/link/{link_id}?message=Link+saved!+Content+being+extracted...", status_code=303)
+        return RedirectResponse(url=f"/link/{link_id}", status_code=303)
 
     # ========== GET /link/{id} — Detail page (lazy-loaded sections) ==========
     @app.get("/link/{link_id}", response_class=HTMLResponse)
@@ -760,8 +882,30 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         url = link.get('url', '')
         domain = get_base_domain(url)
         og_img = link.get('og_image_url') or link.get('screenshot_url') or ''
-        img_html = f'<img src="{_esc(og_img)}" class="img-preview" alt="preview">' if og_img else ""
         score = link.get('direct_score', 0) or 0
+
+        # --- Determine media embed: YouTube > Bluesky > image > nothing ---
+        yt_id = extract_youtube_id(url)
+        bsky = is_bluesky_url(url)
+
+        if yt_id:
+            img_html = (
+                f'<div class="yt-embed-wrap">'
+                f'<iframe src="https://www.youtube.com/embed/{yt_id}" '
+                f'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
+                f'allowfullscreen loading="lazy"></iframe></div>'
+            )
+        elif bsky:
+            # Bluesky post — render placeholder, JS will fetch oEmbed
+            bsky_url_esc = _esc(url)
+            img_html = (
+                f'<div class="bsky-embed-wrap" id="bsky-embed" data-url="{bsky_url_esc}">'
+                f'<div class="lazy-loader">Loading Bluesky post&hellip;</div></div>'
+            )
+        elif og_img:
+            img_html = f'<img src="{_esc(og_img)}" class="img-preview" alt="preview">'
+        else:
+            img_html = ""
 
         # Tags as pills with "+" button at the end
         tags_html = '<div class="tags-row">'
@@ -879,22 +1023,51 @@ fetch('/api/link/'+LID+'/related?limit=6').then(function(r){return r.json();}).t
 fetch('/api/link/'+LID+'/discussions').then(function(r){return r.json();}).then(function(data){
     var c=document.getElementById('discussions-container');var disc=data.discussions||[];
     if(!disc.length){c.innerHTML='<p style="color:#475569;font-size:13px;padding:4px 0">No external discussions found yet. Click refresh to check HN and Reddit.</p>';return;}
-    var LIM=3;var h='';
-    disc.forEach(function(d,i){
-        var icon=d.platform==='hackernews'?'&#129412;':'&#129302;';
-        var pl=d.platform==='hackernews'?'Hacker News':'r/'+(d.subreddit||'reddit');
+
+    // Filter HN and Reddit, sort by combined score (upvotes + comments)
+    var hnReddit=disc.filter(function(d){return d.platform==='hackernews'||d.platform==='reddit';});
+    var bsky=disc.filter(function(d){return d.platform==='bluesky';});
+    
+    // Sort by score (upvotes + comments combined)
+    hnReddit.sort(function(a,b){
+        var scoreA=(a.score||0)+(a.num_comments||0);
+        var scoreB=(b.score||0)+(b.num_comments||0);
+        return scoreB-scoreA;
+    });
+
+    var h='';
+    var LIM=3;
+    
+    // Combined HN + Reddit discussions as compact links
+    hnReddit.forEach(function(d,i){
         var hide=i>=LIM?' style="display:none"':'';
         var cls=i>=LIM?' ext-disc-extra':'';
+        var icon=d.platform==='reddit'?'&#129302;':'&#129412;';
+        var iconColor=d.platform==='reddit'?'#ff4500':'#ff6600';
+        var meta=d.platform==='reddit'?'r/'+_esc(d.subreddit||'reddit'):'Hacker News';
         h+='<a href="'+_esc(d.external_url||'#')+'" target="_blank" class="ext-disc'+cls+'"'+hide+' style="text-decoration:none">'+
-            '<div class="platform-icon">'+icon+'</div>'+
+            '<div class="platform-icon" style="color:'+iconColor+'">'+icon+'</div>'+
             '<div class="disc-info"><div class="disc-title">'+_esc(d.title||'Discussion')+'</div>'+
-            '<div class="disc-meta">'+_esc(pl)+'</div></div>'+
+            '<div class="disc-meta">'+meta+'</div></div>'+
             '<div class="disc-stats"><span>&#9650; '+(d.score||0)+'</span><span>&#128172; '+(d.num_comments||0)+'</span></div></a>';
     });
-    if(disc.length>LIM){
-        var ex=disc.length-LIM;
+    if(hnReddit.length>LIM){
+        var ex=hnReddit.length-LIM;
         h+='<button id="disc-toggle" onclick="_toggleDisc()" style="background:none;border:1px solid #334155;color:#94a3b8;padding:8px 16px;border-radius:8px;cursor:pointer;width:100%;font-size:13px;margin-top:4px">Show '+ex+' more discussion'+(ex!==1?'s':'')+'</button>';
     }
+
+    // Bluesky discussions as compact links (separate section if any)
+    if(bsky.length>0){
+        h+='<div style="margin-bottom:8px;margin-top:'+(hnReddit.length>0?'16':'0')+'px"><span style="color:#0085ff;font-weight:600;font-size:14px">&#129419; Bluesky</span></div>';
+    }
+    bsky.forEach(function(d){
+        h+='<a href="'+_esc(d.external_url||'#')+'" target="_blank" class="ext-disc" style="text-decoration:none">'+
+            '<div class="platform-icon">&#129419;</div>'+
+            '<div class="disc-info"><div class="disc-title">'+_esc(d.title||'Discussion')+'</div>'+
+            '<div class="disc-meta">Bluesky</div></div>'+
+            '<div class="disc-stats"><span>&#9650; '+(d.score||0)+'</span><span>&#128172; '+(d.num_comments||0)+'</span></div></a>';
+    });
+
     c.innerHTML=h;
 }).catch(function(){document.getElementById('discussions-container').innerHTML='<p style="color:#f87171;font-size:13px">Failed to load discussions.</p>';});
 

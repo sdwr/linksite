@@ -3,7 +3,10 @@ Scratchpad HTML pages for Linksite.
 API routes are in scratchpad_api.py — this file handles /add, /browse, /link/{id}.
 """
 
+import os
 import re
+import asyncio
+import httpx
 from typing import Optional, List
 from urllib.parse import urlparse
 from datetime import datetime, timezone
@@ -402,6 +405,37 @@ document.querySelectorAll('form').forEach(function(f) {{
 </body></html>"""
 
 
+# --- Async PostgREST helper for parallel queries ---
+_SUPABASE_URL = None
+_SUPABASE_HEADERS = None
+
+def _init_async_client():
+    """Initialize the async PostgREST config from environment."""
+    global _SUPABASE_URL, _SUPABASE_HEADERS
+    url = os.environ.get('SUPABASE_URL', '')
+    key = os.environ.get('SUPABASE_KEY', '')
+    _SUPABASE_URL = url.rstrip('/') + '/rest/v1'
+    _SUPABASE_HEADERS = {
+        'apikey': key,
+        'Authorization': f'Bearer {key}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+    }
+
+async def _pg_get(table, select='*', params=None):
+    """Async PostgREST GET query. Returns list of dicts."""
+    if _SUPABASE_URL is None:
+        _init_async_client()
+    url = f'{_SUPABASE_URL}/{table}'
+    qp = {'select': select}
+    if params:
+        qp.update(params)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, headers=_SUPABASE_HEADERS, params=qp, timeout=10)
+        r.raise_for_status()
+        return r.json()
+
+
 def register_scratchpad_routes(app, supabase, vectorize_fn):
     """Register all HTML page routes on the FastAPI app."""
 
@@ -600,8 +634,56 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         if not resp.data:
             return HTMLResponse(dark_page("Not Found", '<div class="msg-err">Link not found.</div>'))
 
-        link = _enrich(resp.data[0])
-        related = _find_related(link_id, 6)
+        link = resp.data[0]
+        lid = link['id']
+
+        # --- Parallel enrichment using async HTTP ---
+        async def _fetch_tags():
+            lt_data = await _pg_get('link_tags', 'tag_id', {'link_id': f'eq.{lid}'})
+            tag_ids = [lt['tag_id'] for lt in lt_data]
+            if tag_ids:
+                ids_str = ','.join(str(i) for i in tag_ids)
+                return await _pg_get('tags', 'id,name,slug', {'id': f'in.({ids_str})'})
+            return []
+
+        async def _fetch_notes():
+            return await _pg_get('notes', '*', {
+                'link_id': f'eq.{lid}',
+                'order': 'created_at.desc',
+            })
+
+        async def _fetch_parent():
+            pid = link.get('parent_link_id')
+            if pid:
+                data = await _pg_get('links', 'id,url,title', {'id': f'eq.{pid}'})
+                return data[0] if data else None
+            return None
+
+        async def _fetch_related():
+            return await asyncio.to_thread(_find_related, link_id, 6)
+
+        async def _fetch_ext_disc():
+            return await _pg_get('external_discussions', '*', {
+                'link_id': f'eq.{lid}',
+                'order': 'num_comments.desc',
+            })
+
+        import time as _t
+        _t0 = _t.time()
+        tags, notes, parent, related, ext_discussions = await asyncio.gather(
+            _fetch_tags(),
+            _fetch_notes(),
+            _fetch_parent(),
+            _fetch_related(),
+            _fetch_ext_disc(),
+        )
+        _elapsed = (_t.time() - _t0) * 1000
+        print(f"[PARALLEL] Detail page gather took {_elapsed:.0f}ms")
+
+        link['tags'] = tags
+        link['notes'] = notes
+        link['note_count'] = len(notes)
+        link['parent'] = parent
 
         msgs = ""
         if message:
@@ -688,8 +770,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         if not related_html:
             related_html = '<p style="color:#475569;font-size:13px">No related links found.</p>'
 
-        # External Discussions
-        ext_discussions = get_external_discussions(link_id)
+        # External Discussions (already fetched in parallel above)
         ext_disc_html = '<div class="card">'
         ext_disc_html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
         ext_disc_html += '<h2 style="margin-bottom:0">External Discussions</h2>'
@@ -852,21 +933,25 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                     qr = qr.order('created_at', desc=True)
                 links = (qr.limit(60).execute()).data or []
 
-            # Batch-enrich: tags and note counts in 3 queries instead of 152
+            # Batch-enrich: tags and note counts — notes + link_tags in parallel
             if links:
                 link_ids = [lk['id'] for lk in links]
+                ids_str = ','.join(str(i) for i in link_ids)
 
-                # 1) All notes for these links (just ids for counting)
-                all_notes = supabase.table('notes').select('link_id').in_('link_id', link_ids).execute()
+                # Run notes and link_tags queries in parallel via async HTTP
+                all_notes_data, all_lt_data = await asyncio.gather(
+                    _pg_get('notes', 'link_id', {'link_id': f'in.({ids_str})'}),
+                    _pg_get('link_tags', 'link_id,tag_id', {'link_id': f'in.({ids_str})'}),
+                )
+
                 note_counts = {}
-                for n in (all_notes.data or []):
+                for n in all_notes_data:
                     note_counts[n['link_id']] = note_counts.get(n['link_id'], 0) + 1
 
-                # 2) All link_tags for these links
-                all_lt = supabase.table('link_tags').select('link_id, tag_id').in_('link_id', link_ids).execute()
+                all_lt_data_use = all_lt_data
                 link_tag_map = {}
                 all_tag_ids = set()
-                for lt in (all_lt.data or []):
+                for lt in all_lt_data_use:
                     link_tag_map.setdefault(lt['link_id'], []).append(lt['tag_id'])
                     all_tag_ids.add(lt['tag_id'])
 

@@ -806,7 +806,7 @@ async def api_links_browse(
                 return {"links": [], "total": 0}
 
     if q:
-        query = query.ilike("title", f"%{q}%")
+        query = query.or_(f"title.ilike.%{q}%,url.ilike.%{q}%,description.ilike.%{q}%")
 
     if sort == "score":
         query = query.order("direct_score", desc=True)
@@ -841,10 +841,14 @@ def _get_random_ids():
 
 
 @router.get("/api/random")
-async def api_random_link():
-    """Pick a random link and redirect to its detail page."""
+async def api_random_link(format: Optional[str] = None):
+    """Pick a random link and redirect to its detail page. Use format=json for JSON."""
     ids = _get_random_ids()
     if not ids:
+        if format == "json":
+            return {"id": None, "url": "/browse"}
         return RedirectResponse(url="/browse", status_code=302)
     chosen = random.choice(ids)
+    if format == "json":
+        return {"id": chosen, "url": f"/link/{chosen}"}
     return RedirectResponse(url=f"/link/{chosen}", status_code=302)

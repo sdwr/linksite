@@ -16,7 +16,7 @@ from fastapi import FastAPI, BackgroundTasks, Form, Request, Response, HTTPExcep
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
-from supabase import create_client, Client
+from db_compat import CompatClient
 from pydantic import BaseModel
 
 from ingest import (
@@ -25,6 +25,7 @@ from ingest import (
 )
 from director import Director
 from scratchpad_routes import register_scratchpad_routes
+from user_utils import generate_display_name
 
 import ingest as ingest_module
 from scratchpad_api import router as scratchpad_router, init as scratchpad_init, normalize_url
@@ -32,10 +33,7 @@ from ai_routes import create_ai_router
 
 load_dotenv()
 
-supabase: Client = create_client(
-    os.getenv('SUPABASE_URL'),
-    os.getenv('SUPABASE_KEY')
-)
+supabase = CompatClient()  # Direct postgres via psycopg2
 
 # ============================================================
 # SSE Broadcast Infrastructure
@@ -107,24 +105,50 @@ app.include_router(ai_router)
 @app.middleware("http")
 async def user_identity_middleware(request: Request, call_next):
     user_id = request.cookies.get("user_id")
+    display_name = None
+    new_user = False
 
     if not user_id:
         user_id = str(uuid.uuid4())
-        # Lazy-create user in DB
+        display_name = generate_display_name()
+        new_user = True
         try:
-            supabase.table("users").insert({"id": user_id}).execute()
+            supabase.table("users").insert({
+                "id": user_id,
+                "display_name": display_name,
+            }).execute()
         except Exception:
             pass  # May already exist
+    else:
+        # Verify user exists, fetch display_name
+        try:
+            resp = supabase.table("users").select("display_name").eq("id", user_id).execute()
+            if resp.data:
+                display_name = resp.data[0].get("display_name", "Anonymous")
+            else:
+                # Cookie references a deleted user â€” recreate
+                display_name = generate_display_name()
+                new_user = True
+                try:
+                    supabase.table("users").insert({
+                        "id": user_id,
+                        "display_name": display_name,
+                    }).execute()
+                except Exception:
+                    pass
+        except Exception:
+            display_name = "Anonymous"
 
     request.state.user_id = user_id
+    request.state.display_name = display_name or "Anonymous"
     response = await call_next(request)
 
-    # Set cookie if not present
-    if not request.cookies.get("user_id"):
+    # Set cookie if new user
+    if new_user:
         response.set_cookie(
             key="user_id",
             value=user_id,
-            httponly=True,
+            httponly=False,  # Allow JS to read for localStorage sync
             samesite="lax",
             max_age=60 * 60 * 24 * 365,  # 1 year
         )
@@ -140,6 +164,46 @@ class VoteRequest(BaseModel):
 
 class NominateRequest(BaseModel):
     user_id: Optional[str] = None  # optional override; defaults to cookie
+
+
+# ============================================================
+# User API Endpoints
+# ============================================================
+
+@app.post("/api/user")
+async def api_create_user():
+    """Create a new anonymous user with a fun display name."""
+    user_id = str(uuid.uuid4())
+    display_name = generate_display_name()
+    try:
+        resp = supabase.table("users").insert({
+            "id": user_id,
+            "display_name": display_name,
+        }).execute()
+        user = resp.data[0] if resp.data else {"id": user_id, "display_name": display_name}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create user: {e}")
+    return {"user": user}
+
+
+@app.get("/api/user/{user_id}")
+async def api_get_user(user_id: str):
+    """Get a user by ID. Used to verify a stored user still exists."""
+    resp = supabase.table("users").select("id, display_name, created_at, claimed").eq("id", user_id).execute()
+    if not resp.data:
+        raise HTTPException(404, "User not found")
+    return {"user": resp.data[0]}
+
+
+@app.get("/api/me")
+async def api_get_me(request: Request):
+    """Get the current user from the cookie/session."""
+    user_id = request.state.user_id
+    display_name = request.state.display_name
+    return {
+        "user_id": user_id,
+        "display_name": display_name,
+    }
 
 
 # ============================================================

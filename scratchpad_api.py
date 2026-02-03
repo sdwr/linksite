@@ -44,6 +44,7 @@ class LinkEdit(BaseModel):
 class NoteCreate(BaseModel):
     author: str = "anonymous"
     text: str
+    user_id: Optional[str] = None
 
 class TagsAdd(BaseModel):
     tags: List[str]
@@ -183,9 +184,27 @@ def get_link_tags(link_id: int) -> list:
     return tags_resp.data or []
 
 def get_link_notes(link_id: int) -> list:
-    """Get notes for a link."""
+    """Get notes for a link, enriched with user display names."""
     resp = supabase.table("notes").select("*").eq("link_id", link_id).order("created_at", desc=True).execute()
-    return resp.data or []
+    notes = resp.data or []
+    # Batch-fetch user display names
+    user_ids = list(set(n.get("user_id") for n in notes if n.get("user_id")))
+    user_map = {}
+    if user_ids:
+        try:
+            users_resp = supabase.table("users").select("id, display_name").in_("id", user_ids).execute()
+            for u in (users_resp.data or []):
+                user_map[u["id"]] = u.get("display_name", "Anonymous")
+        except Exception:
+            pass
+    # Attach display_name to each note
+    for note in notes:
+        uid = note.get("user_id")
+        if uid and uid in user_map:
+            note["display_name"] = user_map[uid]
+        else:
+            note["display_name"] = note.get("author", "anonymous")
+    return notes
 
 def get_related_links(link_id: int, limit: int = 10) -> list:
     """Find related links via parent or feed."""
@@ -567,10 +586,21 @@ async def api_check_link(url: str = "", comments: int = 5):
     ).eq("link_id", lid).order("created_at", desc=True).limit(comments).execute()
     comment_list = []
     for n in (notes_resp.data or []):
+        author_name = n.get("author", "anon")
+        # Look up display name from user_id if available
+        note_user_id = n.get("user_id")
+        if note_user_id:
+            try:
+                user_resp = supabase.table("users").select("display_name").eq("id", note_user_id).execute()
+                if user_resp.data:
+                    author_name = user_resp.data[0].get("display_name", author_name)
+            except Exception:
+                pass
         comment_list.append({
-            "author": n.get("author", "anon"),
+            "author": author_name,
             "text": n.get("text", ""),
             "time": n.get("created_at", ""),
+            "user_id": note_user_id,
         })
 
     # Fetch external discussions
@@ -685,10 +715,22 @@ async def api_link_notes(link_id: int):
 
 
 @router.post("/api/link/{link_id}/notes")
-async def api_link_note_create(link_id: int, body: NoteCreate):
-    resp = supabase.table("notes").insert({
+async def api_link_note_create(link_id: int, body: NoteCreate, request: Request):
+    insert_data = {
         "link_id": link_id, "author": body.author, "text": body.text
-    }).execute()
+    }
+    # Attach user_id from body or from cookie
+    user_id = body.user_id
+    if not user_id:
+        user_id = getattr(getattr(request, 'state', None), 'user_id', None)
+    if user_id:
+        insert_data["user_id"] = user_id
+        # Also set author to display name if author is default
+        if body.author in ("anonymous", "anon"):
+            display_name = getattr(getattr(request, 'state', None), 'display_name', None)
+            if display_name and display_name != "Anonymous":
+                insert_data["author"] = display_name
+    resp = supabase.table("notes").insert(insert_data).execute()
     return {"note": resp.data[0] if resp.data else None}
 
 

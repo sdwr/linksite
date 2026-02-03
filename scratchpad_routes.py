@@ -769,21 +769,9 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             sl = _esc(t.get('slug', ''))
             nm = _esc(t.get('name', sl))
             tags_html += f'<span class="pill">{nm}<a href="/link/{link_id}/remove-tag/{sl}" class="x">&times;</a></span>'
-        tags_html += f'''<a href="#" class="tag-add-btn" onclick="document.getElementById('tag-form').classList.toggle('show');this.style.display='none';document.getElementById('tag-input').focus();return false;">+</a>
-        <form id="tag-form" class="tag-form" method="POST" action="/link/{link_id}/add-tags">
-            <input id="tag-input" type="text" name="tags" placeholder="tag1, tag2" required>
-            <button type="submit">add</button>
-        </form>'''
         tags_html += '</div>'
         if not link.get('tags'):
-            tags_html = f'''<div class="tags-row">
-                <span style="color:#475569;font-size:13px;margin-right:8px">No tags yet</span>
-                <a href="#" class="tag-add-btn" onclick="document.getElementById('tag-form').classList.toggle('show');this.style.display='none';document.getElementById('tag-input').focus();return false;">+</a>
-                <form id="tag-form" class="tag-form" method="POST" action="/link/{link_id}/add-tags">
-                    <input id="tag-input" type="text" name="tags" placeholder="tag1, tag2" required>
-                    <button type="submit">add</button>
-                </form>
-            </div>'''
+            tags_html = '<div class="tags-row"><span style="color:#475569;font-size:13px">No tags yet</span></div>'
 
         # Parent link
         parent_html = ""

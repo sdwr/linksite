@@ -817,10 +817,40 @@ async def api_links_browse(
     resp = query.execute()
 
     links = resp.data or []
-    for link in links:
-        link["tags"] = get_link_tags(link["id"])
-        nc = supabase.table("notes").select("id", count="exact").eq("link_id", link["id"]).execute()
-        link["note_count"] = nc.count or 0
+
+    if links:
+        link_ids = [link["id"] for link in links]
+
+        # Batch fetch all link_tags (3 queries instead of N*2)
+        lt_resp = supabase.table("link_tags").select("link_id, tag_id").in_("link_id", link_ids).execute()
+        all_link_tags = lt_resp.data or []
+
+        # Get unique tag IDs and batch fetch tag info
+        tag_ids = list(set(lt["tag_id"] for lt in all_link_tags))
+        tag_map = {}
+        if tag_ids:
+            tags_resp = supabase.table("tags").select("id, name, slug").in_("id", tag_ids).execute()
+            for t in (tags_resp.data or []):
+                tag_map[t["id"]] = t
+
+        # Build link_id -> tags mapping
+        link_tags_map = {}
+        for lt in all_link_tags:
+            lid = lt["link_id"]
+            tid = lt["tag_id"]
+            if tid in tag_map:
+                link_tags_map.setdefault(lid, []).append(tag_map[tid])
+
+        # Batch fetch note counts (one query, count client-side)
+        notes_resp = supabase.table("notes").select("link_id").in_("link_id", link_ids).execute()
+        note_counts = {}
+        for n in (notes_resp.data or []):
+            note_counts[n["link_id"]] = note_counts.get(n["link_id"], 0) + 1
+
+        # Assign to links
+        for link in links:
+            link["tags"] = link_tags_map.get(link["id"], [])
+            link["note_count"] = note_counts.get(link["id"], 0)
 
     return {"links": links, "total": resp.count or 0}
 

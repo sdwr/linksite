@@ -11,11 +11,11 @@ import random
 import math
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable
-from supabase import Client
+# db_compat provides the same .table() API as supabase Client
 
 
 class Director:
-    def __init__(self, supabase: Client, broadcast_fn: Callable = None):
+    def __init__(self, supabase, broadcast_fn: Callable = None):
         self.db = supabase
         self.running = False
         self._task: Optional[asyncio.Task] = None

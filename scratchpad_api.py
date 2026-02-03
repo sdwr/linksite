@@ -59,31 +59,32 @@ def get_base_domain(url: str) -> str:
 
 def find_or_create_parent(url: str, link_id: int):
     """Find or create a parent link for the base domain."""
-    base = get_base_domain(url)
     parsed = urlparse(url)
+    host = (parsed.netloc or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
 
     # Don't create parent for root domains
-    if parsed.path in ("", "/") and not parsed.query:
+    path = parsed.path.rstrip('/')
+    if not path and not parsed.query:
         return None
+
+    # Normalized base domain URL
+    base = 'https://' + host
 
     # Check if base domain exists
     resp = supabase.table("links").select("id").eq("url", base).execute()
     if resp.data:
         parent_id = resp.data[0]["id"]
     else:
-        # Also check without trailing slash
-        resp2 = supabase.table("links").select("id").eq("url", base + "/").execute()
-        if resp2.data:
-            parent_id = resp2.data[0]["id"]
-        else:
-            # Create stub entry for the domain
-            stub = supabase.table("links").insert({
-                "url": base,
-                "title": parsed.netloc,
-                "source": "auto-parent",
-                "description": f"Parent site: {parsed.netloc}",
-            }).execute()
-            parent_id = stub.data[0]["id"] if stub.data else None
+        # Create stub entry for the domain
+        stub = supabase.table("links").insert({
+            "url": base,
+            "title": host,
+            "source": "auto-parent",
+            "description": f"Parent site: {host}",
+        }).execute()
+        parent_id = stub.data[0]["id"] if stub.data else None
 
     if parent_id and parent_id != link_id:
         supabase.table("links").update({"parent_link_id": parent_id}).eq("id", link_id).execute()
@@ -258,18 +259,36 @@ def _add_tags(link_id: int, tag_names: list, author: str = "anonymous"):
 LINKSITE_BASE_URL = "https://linksite-dev-bawuw.sprites.app"
 
 def normalize_url(url: str) -> str:
-    """Normalize a URL: add https:// if missing, strip www."""
+    """Normalize a URL: add https://, strip www, strip trailing slash, lowercase host."""
     url = url.strip()
     if not url:
         return url
-    if not url.startswith(('http://', 'https://')):
+    # Lowercase the scheme for comparison
+    url_lower = url.lower()
+    # Add scheme if missing
+    if not url_lower.startswith(('http://', 'https://')):
         url = 'https://' + url
+    # Normalize http -> https
+    elif url_lower.startswith('http://'):
+        url = 'https://' + url[7:]
     parsed = urlparse(url)
-    host = parsed.netloc or ''
+    # Lowercase and strip www from host
+    host = (parsed.netloc or '').lower()
     if host.startswith('www.'):
         host = host[4:]
-        url = parsed._replace(netloc=host).geturl()
-    return url
+    # Strip trailing slash from path (but keep non-empty paths)
+    path = parsed.path
+    if path == '/':
+        path = ''
+    elif path.endswith('/'):
+        path = path.rstrip('/')
+    # Rebuild URL
+    result = 'https://' + host + path
+    if parsed.query:
+        result += '?' + parsed.query
+    if parsed.fragment:
+        result += '#' + parsed.fragment
+    return result
 
 
 
@@ -468,6 +487,8 @@ def check_reverse_lookup(url: str, link_id: int):
         print(f"[ExtDisc] Marked link {link_id} as discussion-ref")
     
     if original_url:
+        # Normalize the resolved URL before checking/creating
+        original_url = normalize_url(original_url)
         
         # Check if original URL already exists
         existing = supabase.table("links").select("id").eq("url", original_url).execute()
@@ -581,6 +602,7 @@ async def api_check_link(url: str = "", comments: int = 5):
 @router.get("/api/link")
 async def api_link_lookup(url: str):
     """Look up a link by URL."""
+    url = normalize_url(url)
     resp = supabase.table("links").select(
         "id, url, title, description, og_image_url, screenshot_url, source, submitted_by, parent_link_id, direct_score, created_at, feed_id, meta_json"
     ).eq("url", url).execute()
@@ -595,6 +617,7 @@ async def api_link_lookup(url: str):
 @router.post("/api/link")
 async def api_link_create(body: LinkCreate):
     """Save a new link. Returns existing if URL already tracked."""
+    body.url = normalize_url(body.url)
     existing = supabase.table("links").select("id").eq("url", body.url).execute()
     if existing.data:
         link_id = existing.data[0]["id"]

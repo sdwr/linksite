@@ -40,20 +40,36 @@ def time_ago(dt_str):
 
 
 def normalize_url(url: str) -> str:
-    """Normalize a URL: add https:// if missing, strip www."""
+    """Normalize a URL: add https://, strip www, strip trailing slash, lowercase host."""
     url = url.strip()
     if not url:
         return url
+    # Lowercase the scheme for comparison
+    url_lower = url.lower()
     # Add scheme if missing
-    if not url.startswith(('http://', 'https://')):
+    if not url_lower.startswith(('http://', 'https://')):
         url = 'https://' + url
-    # Strip www.
+    # Normalize http -> https
+    elif url_lower.startswith('http://'):
+        url = 'https://' + url[7:]
     parsed = urlparse(url)
-    host = parsed.netloc or ''
+    # Lowercase and strip www from host
+    host = (parsed.netloc or '').lower()
     if host.startswith('www.'):
         host = host[4:]
-        url = parsed._replace(netloc=host).geturl()
-    return url
+    # Strip trailing slash from path (but keep non-empty paths)
+    path = parsed.path
+    if path == '/':
+        path = ''
+    elif path.endswith('/'):
+        path = path.rstrip('/')
+    # Rebuild URL
+    result = 'https://' + host + path
+    if parsed.query:
+        result += '?' + parsed.query
+    if parsed.fragment:
+        result += '#' + parsed.fragment
+    return result
 
 
 def get_or_create_tag(supabase, slug: str) -> dict:
@@ -434,21 +450,24 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
 
     async def _ensure_parent_site(url, link_id):
         try:
-            domain = get_base_domain(url)
-            if not domain:
-                return
-            base_url = f"https://{domain}"
             parsed = urlparse(url)
-            path = parsed.path.strip('/')
+            host = (parsed.netloc or '').lower()
+            if host.startswith('www.'):
+                host = host[4:]
+            if not host:
+                return
+            # Don't create parent for root domains
+            path = parsed.path.rstrip('/')
             if not path and not parsed.query:
                 return
+            base_url = 'https://' + host
             existing = supabase.table('links').select('id').eq('url', base_url).execute()
             if existing.data:
                 parent_id = existing.data[0]['id']
             else:
                 result = supabase.table('links').insert({
                     'url': base_url,
-                    'title': domain,
+                    'title': host,
                     'source': 'auto-parent',
                 }).execute()
                 parent_id = result.data[0]['id'] if result.data else None

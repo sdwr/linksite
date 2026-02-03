@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
+from scratchpad_api import normalize_url
+
 from prompts import (
     discovery_filter_prompt,
     discovery_hn_prompt,
@@ -331,6 +333,7 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
                 url = c.get("url", "").strip()
                 if not url:
                     continue
+                url = normalize_url(url)
 
                 # Check if already exists
                 existing = self.supabase.table("links").select("id").eq("url", url).execute()

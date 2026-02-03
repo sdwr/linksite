@@ -27,7 +27,7 @@ from director import Director
 from scratchpad_routes import register_scratchpad_routes
 
 import ingest as ingest_module
-from scratchpad_api import router as scratchpad_router, init as scratchpad_init
+from scratchpad_api import router as scratchpad_router, init as scratchpad_init, normalize_url
 from ai_routes import create_ai_router
 
 load_dotenv()
@@ -199,6 +199,7 @@ def _nav():
         <a href="/add">+ Add</a>
         <a href="/links">Links</a>
         <a href="/admin">Admin</a>
+        <a href="/admin/ai">AI Engine</a>
         <a href="/api/now">API Status</a>
         <a href="/" style="margin-left:auto;background:#2563eb;color:#fff;padding:6px 16px;border-radius:6px;font-size:14px;">Frontend &#10132;</a>
     </nav>"""
@@ -1172,6 +1173,7 @@ async def process_single_feed(feed: dict):
             url = item.get('url', '')
             if not url:
                 continue
+            url = normalize_url(url)
             existing = supabase.table('links').select('id').eq('url', url).execute()
             if existing.data:
                 continue
@@ -1199,6 +1201,389 @@ async def process_single_feed(feed: dict):
         supabase.table('feeds').update({'status': 'error', 'last_error': str(e)[:500]}).eq('id', feed_id).execute()
     finally:
         _active_syncs.pop(feed_id, None)
+
+
+
+# ============================================================
+# Admin: AI Content Engine
+# ============================================================
+
+from ai_engine import AIEngine as _AIEngine
+
+def _get_ai_engine():
+    """Get a shared AI engine instance."""
+    return _AIEngine(supabase)
+
+
+@app.get("/admin/ai", response_class=HTMLResponse)
+async def admin_ai_dashboard(message: str = None, error: str = None):
+    try:
+        engine = _get_ai_engine()
+
+        # --- Health ---
+        has_anthropic = bool(engine.api_key)
+        has_brave = bool(engine.brave_key)
+
+        health_color = "#16a34a" if has_anthropic else "#dc2626"
+        health_text = "Operational" if has_anthropic else "Degraded — No API Key"
+        brave_color = "#16a34a" if has_brave else "#f59e0b"
+        brave_text = "Configured" if has_brave else "Missing (HN fallback)"
+
+        health_html = f"""<div class="card">
+            <h2>&#129302; AI Engine Health</h2>
+            <div class="kv"><span class="label">Status</span>
+                <span style="color:{health_color};font-weight:700">{health_text}</span></div>
+            <div class="kv"><span class="label">Anthropic API</span>
+                <span style="color:{health_color}">{("&#10003; " if has_anthropic else "&#10007; ")}{"Key set" if has_anthropic else "Not configured"}</span></div>
+            <div class="kv"><span class="label">Brave Search</span>
+                <span style="color:{brave_color}">{("&#10003; " if has_brave else "&#9888; ")}{brave_text}</span></div>
+        </div>"""
+
+        # --- Token Usage Stats ---
+        all_runs = supabase.table("ai_runs").select(
+            "type, status, results_count, tokens_used, model, created_at"
+        ).order("created_at", desc=True).execute()
+        runs_data = all_runs.data or []
+
+        now = datetime.now(timezone.utc)
+        day_ago = (now - timedelta(hours=24)).isoformat()
+        week_ago = (now - timedelta(days=7)).isoformat()
+
+        completed_runs = [r for r in runs_data if r.get("status") == "completed"]
+        total_tokens_all = sum(r.get("tokens_used", 0) or 0 for r in completed_runs)
+        total_tokens_24h = sum(r.get("tokens_used", 0) or 0 for r in completed_runs
+                               if (r.get("created_at") or "") >= day_ago)
+        total_tokens_7d = sum(r.get("tokens_used", 0) or 0 for r in completed_runs
+                              if (r.get("created_at") or "") >= week_ago)
+
+        # Tokens by model
+        tokens_by_model = {}
+        for r in completed_runs:
+            m = r.get("model") or "unknown"
+            tokens_by_model[m] = tokens_by_model.get(m, 0) + (r.get("tokens_used", 0) or 0)
+
+        # Tokens by run type
+        tokens_by_type = {}
+        for r in completed_runs:
+            t = r.get("type") or "unknown"
+            tokens_by_type[t] = tokens_by_type.get(t, 0) + (r.get("tokens_used", 0) or 0)
+
+        # Cost estimates (avg input/output ratio ~60/40 for typical usage)
+        # Haiku: $0.25/MTok in, $1.25/MTok out -> weighted avg ~$0.65/MTok
+        # Sonnet: $3/MTok in, $15/MTok out -> weighted avg ~$7.80/MTok
+        cost_rates = {"haiku": 0.65, "sonnet": 7.80, "unknown": 0.65}
+        total_cost = 0.0
+        cost_by_model = {}
+        for model, tok in tokens_by_model.items():
+            rate = cost_rates.get(model, 0.65)
+            cost = (tok / 1_000_000) * rate
+            cost_by_model[model] = cost
+            total_cost += cost
+
+        def _fmt_tokens(n):
+            if n >= 1_000_000:
+                return f"{n/1_000_000:.2f}M"
+            elif n >= 1_000:
+                return f"{n/1_000:.1f}K"
+            return str(n)
+
+        model_rows = ""
+        for model in sorted(tokens_by_model.keys()):
+            tok = tokens_by_model[model]
+            cost = cost_by_model.get(model, 0)
+            model_rows += f"""<div class="kv">
+                <span class="label">{_esc(model)}</span>
+                <span>{_fmt_tokens(tok)} tokens &middot; ~${cost:.4f}</span>
+            </div>"""
+
+        type_rows = ""
+        for rtype in sorted(tokens_by_type.keys()):
+            tok = tokens_by_type[rtype]
+            type_rows += f"""<div class="kv">
+                <span class="label">{_esc(rtype)}</span>
+                <span>{_fmt_tokens(tok)} tokens</span>
+            </div>"""
+
+        # Daily breakdown (last 7 days)
+        daily_usage = {}
+        for r in completed_runs:
+            dt = (r.get("created_at") or "")[:10]
+            if dt:
+                daily_usage[dt] = daily_usage.get(dt, 0) + (r.get("tokens_used", 0) or 0)
+
+        daily_html = ""
+        for day in sorted(daily_usage.keys(), reverse=True)[:7]:
+            tok = daily_usage[day]
+            daily_html += f'<div class="kv"><span class="label">{day}</span><span>{_fmt_tokens(tok)}</span></div>'
+        if not daily_html:
+            daily_html = '<span style="color:#94a3b8">No usage yet</span>'
+
+        token_html = f"""<div class="card">
+            <h2>&#128200; Token Usage</h2>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+                <div style="background:#f0f9ff;padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:24px;font-weight:700;color:#1e40af">{_fmt_tokens(total_tokens_all)}</div>
+                    <div style="font-size:12px;color:#64748b">All Time</div>
+                </div>
+                <div style="background:#f0fdf4;padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:24px;font-weight:700;color:#166534">{_fmt_tokens(total_tokens_24h)}</div>
+                    <div style="font-size:12px;color:#64748b">Last 24h</div>
+                </div>
+                <div style="background:#fefce8;padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:24px;font-weight:700;color:#854d0e">{_fmt_tokens(total_tokens_7d)}</div>
+                    <div style="font-size:12px;color:#64748b">Last 7 Days</div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+                <div style="background:#faf5ff;padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:20px;font-weight:700;color:#7c3aed">${total_cost:.4f}</div>
+                    <div style="font-size:12px;color:#64748b">Est. Total Cost</div>
+                </div>
+                <div style="background:#fff1f2;padding:12px;border-radius:8px;text-align:center">
+                    <div style="font-size:20px;font-weight:700;color:#be123c">{len(completed_runs)}</div>
+                    <div style="font-size:12px;color:#64748b">Completed Runs</div>
+                </div>
+            </div>
+            <details style="margin-top:8px">
+                <summary style="cursor:pointer;font-weight:600;font-size:14px;color:#475569">By Model</summary>
+                <div style="margin-top:8px">{model_rows if model_rows else '<span style="color:#94a3b8">No data</span>'}</div>
+            </details>
+            <details style="margin-top:8px">
+                <summary style="cursor:pointer;font-weight:600;font-size:14px;color:#475569">By Run Type</summary>
+                <div style="margin-top:8px">{type_rows if type_rows else '<span style="color:#94a3b8">No data</span>'}</div>
+            </details>
+            <details style="margin-top:8px">
+                <summary style="cursor:pointer;font-weight:600;font-size:14px;color:#475569">Daily Breakdown</summary>
+                <div style="margin-top:8px">{daily_html}</div>
+            </details>
+        </div>"""
+
+        # --- Discovery Controls ---
+        discover_html = f"""<div class="card">
+            <h2>&#128269; Discover Links</h2>
+            <form method="POST" action="/admin/ai/discover" style="display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                    <div style="flex:1;min-width:200px">
+                        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Topic (optional)</label>
+                        <input type="text" name="topic" placeholder="e.g. AI safety, Rust programming..." style="width:100%">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Count</label>
+                        <input type="number" name="count" value="5" min="1" max="20" style="width:70px">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Source</label>
+                        <select name="source">
+                            <option value="web">Web (Brave)</option>
+                            <option value="hn" selected>Hacker News</option>
+                            <option value="reddit">Reddit</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" type="submit">&#9889; Discover</button>
+                </div>
+            </form>
+        </div>"""
+
+        # --- Enrichment Controls ---
+        enrich_html = f"""<div class="card">
+            <h2>&#10024; Enrich Links</h2>
+            <form method="POST" action="/admin/ai/enrich" style="display:flex;flex-direction:column;gap:10px">
+                <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+                    <div>
+                        <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Limit</label>
+                        <input type="number" name="limit" value="5" min="1" max="50" style="width:70px">
+                    </div>
+                    <div style="display:flex;gap:12px;align-items:center;padding-top:18px">
+                        <label style="font-size:13px"><input type="checkbox" name="types" value="description" checked> Descriptions</label>
+                        <label style="font-size:13px"><input type="checkbox" name="types" value="tags" checked> Tags</label>
+                        <label style="font-size:13px"><input type="checkbox" name="types" value="comments" checked> Comments</label>
+                    </div>
+                    <button class="btn btn-primary" type="submit">&#10024; Enrich Batch</button>
+                </div>
+            </form>
+        </div>"""
+
+        # --- Recent Runs ---
+        recent_runs = runs_data[:20]
+        runs_rows = ""
+        for r in recent_runs:
+            rid = (r.get("id") or "?")[:8]
+            rtype = _esc(r.get("type") or "?")
+            rstatus = r.get("status") or "?"
+            rtokens = r.get("tokens_used") or 0
+            rresults = r.get("results_count") or 0
+            rmodel = _esc(r.get("model") or "-")
+            rcreated = (r.get("created_at") or "")[:19].replace("T", " ")
+            rerror = r.get("error")
+
+            status_color = {"completed": "#16a34a", "failed": "#dc2626", "running": "#f59e0b"}.get(rstatus, "#94a3b8")
+            type_badge_bg = {"discover": "#dbeafe", "enrich": "#fce7f3"}.get(rtype, "#f1f5f9")
+            type_badge_color = {"discover": "#1e40af", "enrich": "#9d174d"}.get(rtype, "#475569")
+
+            error_html = ""
+            if rerror:
+                short_err = _esc(rerror[:60])
+                error_html = f'<br><span style="color:#dc2626;font-size:11px" title="{_esc(rerror)}">{short_err}...</span>'
+
+            runs_rows += f"""<tr>
+                <td><code style="font-size:12px;color:#64748b">{rid}</code></td>
+                <td><span style="background:{type_badge_bg};color:{type_badge_color};padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600">{rtype}</span></td>
+                <td><span style="color:{status_color};font-weight:600">{_esc(rstatus)}</span>{error_html}</td>
+                <td style="text-align:right">{_fmt_tokens(rtokens)}</td>
+                <td style="text-align:center">{rresults}</td>
+                <td style="font-size:12px;color:#64748b">{rmodel}</td>
+                <td style="font-size:12px;color:#64748b">{rcreated}</td>
+            </tr>"""
+
+        if not runs_rows:
+            runs_rows = '<tr><td colspan="7" style="color:#94a3b8;text-align:center;padding:24px">No runs yet</td></tr>'
+
+        runs_html = f"""<div class="card">
+            <h2>&#128203; Recent Runs</h2>
+            <div style="overflow-x:auto">
+            <table>
+            <thead><tr>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th style="text-align:right">Tokens</th>
+                <th style="text-align:center">Results</th>
+                <th>Model</th>
+                <th>Created</th>
+            </tr></thead>
+            <tbody>{runs_rows}</tbody>
+            </table>
+            </div>
+        </div>"""
+
+        # --- Recent AI Content ---
+        content_resp = supabase.table("ai_generated_content").select(
+            "id, link_id, content_type, content, author, model_used, tokens_used, created_at"
+        ).order("created_at", desc=True).limit(20).execute()
+        content_items = content_resp.data or []
+
+        content_rows = ""
+        for c in content_items:
+            clink = c.get("link_id", "?")
+            ctype = _esc(c.get("content_type") or "?")
+            cauthor = _esc(c.get("author") or "-")
+            raw_content = c.get("content") or ""
+            preview = _esc(raw_content[:120]) + ("..." if len(raw_content) > 120 else "")
+            ccreated = (c.get("created_at") or "")[:19].replace("T", " ")
+
+            type_colors = {
+                "description": ("#dbeafe", "#1e40af"),
+                "comment": ("#dcfce7", "#166534"),
+                "tag": ("#fef3c7", "#92400e"),
+                "summary": ("#e0e7ff", "#3730a3"),
+                "related": ("#fce7f3", "#9d174d"),
+            }
+            bg, fg = type_colors.get(ctype, ("#f1f5f9", "#475569"))
+
+            content_rows += f"""<tr>
+                <td><a href="/links?feed_id=" style="font-weight:600">#{clink}</a></td>
+                <td><span style="background:{bg};color:{fg};padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600">{ctype}</span></td>
+                <td style="font-size:12px;color:#64748b">{cauthor}</td>
+                <td style="font-size:13px;max-width:400px">{preview}</td>
+                <td style="font-size:12px;color:#64748b">{ccreated}</td>
+            </tr>"""
+
+        if not content_rows:
+            content_rows = '<tr><td colspan="5" style="color:#94a3b8;text-align:center;padding:24px">No AI-generated content yet</td></tr>'
+
+        content_html = f"""<div class="card">
+            <h2>&#128172; Recent AI Content</h2>
+            <div style="overflow-x:auto">
+            <table>
+            <thead><tr>
+                <th>Link</th>
+                <th>Type</th>
+                <th>Author</th>
+                <th>Preview</th>
+                <th>Created</th>
+            </tr></thead>
+            <tbody>{content_rows}</tbody>
+            </table>
+            </div>
+        </div>"""
+
+        # --- Assemble ---
+        body = _messages(message, error)
+        body += health_html
+        body += '<div class="grid-2">'
+        body += token_html
+        body += '<div>' + discover_html + enrich_html + '</div>'
+        body += '</div>'
+        body += runs_html
+        body += content_html
+
+        return HTMLResponse(_page("AI Engine", body))
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(_page("AI Engine - Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
+
+
+@app.post("/admin/ai/discover")
+async def admin_ai_discover(background_tasks: BackgroundTasks,
+                             topic: str = Form(""),
+                             count: int = Form(5),
+                             source: str = Form("hn")):
+    engine = _get_ai_engine()
+    topic = topic.strip() or None
+
+    if count <= 5:
+        try:
+            result = await engine.discover_links(topic=topic, source=source, count=count)
+            discovered = result.get("discovered", 0)
+            err = result.get("error")
+            if err:
+                return RedirectResponse(
+                    url=f"/admin/ai?error=Discovery error: {err}",
+                    status_code=303)
+            return RedirectResponse(
+                url=f"/admin/ai?message=Discovered {discovered} new links",
+                status_code=303)
+        except Exception as e:
+            return RedirectResponse(
+                url=f"/admin/ai?error={e}",
+                status_code=303)
+    else:
+        async def _run():
+            await engine.discover_links(topic=topic, source=source, count=count)
+        background_tasks.add_task(_run)
+        return RedirectResponse(
+            url=f"/admin/ai?message=Discovery started in background ({count} links, source: {source})",
+            status_code=303)
+
+
+@app.post("/admin/ai/enrich")
+async def admin_ai_enrich(background_tasks: BackgroundTasks,
+                           limit: int = Form(5),
+                           types: list = Form([])):
+    engine = _get_ai_engine()
+    if not types:
+        types = ["description", "tags", "comments"]
+
+    if limit <= 3:
+        try:
+            result = await engine.enrich_batch(limit=limit, types=types)
+            enriched = result.get("enriched", 0)
+            return RedirectResponse(
+                url=f"/admin/ai?message=Enriched {enriched} links",
+                status_code=303)
+        except Exception as e:
+            return RedirectResponse(
+                url=f"/admin/ai?error={e}",
+                status_code=303)
+    else:
+        async def _run():
+            await engine.enrich_batch(limit=limit, types=types)
+        background_tasks.add_task(_run)
+        return RedirectResponse(
+            url=f"/admin/ai?message=Enrichment started in background ({limit} links)",
+            status_code=303)
 
 
 # ============================================================

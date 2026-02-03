@@ -28,6 +28,7 @@ from scratchpad_routes import register_scratchpad_routes
 
 import ingest as ingest_module
 from scratchpad_api import router as scratchpad_router, init as scratchpad_init
+from ai_routes import create_ai_router
 
 load_dotenv()
 
@@ -96,6 +97,10 @@ app.include_router(scratchpad_router)
 
 # Register scratchpad API + HTML routes
 register_scratchpad_routes(app, supabase, vectorize)
+
+# AI Content Engine
+ai_router = create_ai_router(supabase)
+app.include_router(ai_router)
 
 # --- User Identity Middleware ---
 

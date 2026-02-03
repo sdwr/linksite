@@ -678,7 +678,10 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         ext_disc_html += '</div>'
         
         if ext_discussions:
-            for d in ext_discussions:
+            DISC_LIMIT = 3
+            for idx, d in enumerate(ext_discussions):
+                hidden = ' style="display:none"' if idx >= DISC_LIMIT else ''
+                hidden_class = ' ext-disc-hidden' if idx >= DISC_LIMIT else ''
                 platform = d.get('platform', '')
                 icon = '&#129412;' if platform == 'hackernews' else '&#129302;'  # Y for HN, robot for reddit
                 platform_label = 'Hacker News' if platform == 'hackernews' else f'r/{d.get("subreddit", "reddit")}'
@@ -686,12 +689,15 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                 d_url = _esc(d.get('external_url', '#'))
                 d_score = d.get('score', 0) or 0
                 d_comments = d.get('num_comments', 0) or 0
-                ext_disc_html += f'<a href="{d_url}" target="_blank" class="ext-disc" style="text-decoration:none">'
+                ext_disc_html += f'<a href="{d_url}" target="_blank" class="ext-disc{hidden_class}"{hidden} style="text-decoration:none{"" if idx < DISC_LIMIT else ";display:none"}">'
                 ext_disc_html += f'<div class="platform-icon">{icon}</div>'
                 ext_disc_html += f'<div class="disc-info"><div class="disc-title">{d_title}</div>'
                 ext_disc_html += f'<div class="disc-meta">{_esc(platform_label)}</div></div>'
                 ext_disc_html += f'<div class="disc-stats"><span>&#9650; {d_score}</span><span>&#128172; {d_comments}</span></div>'
                 ext_disc_html += '</a>'
+            if len(ext_discussions) > DISC_LIMIT:
+                extra = len(ext_discussions) - DISC_LIMIT
+                ext_disc_html += f'<button onclick="document.querySelectorAll(\'.ext-disc-hidden\').forEach(e=>{{e.style.display=\'\';e.classList.remove(\'ext-disc-hidden\')}});this.remove()" style="background:none;border:1px solid #334155;color:#94a3b8;padding:8px 16px;border-radius:8px;cursor:pointer;width:100%;font-size:13px;margin-top:4px">Show {extra} more discussion{"s" if extra != 1 else ""}</button>'
         else:
             ext_disc_html += '<p style="color:#475569;font-size:13px;padding:4px 0">No external discussions found yet. Click refresh to check HN and Reddit.</p>'
         
@@ -709,10 +715,13 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             </div>
             {parent_html}
             <h1 style="margin-bottom:4px;padding-right:80px"><a href="{_esc(url)}" target="_blank" style="color:#f1f5f9;text-decoration:none">{title}</a></h1>
-            <div style="color:#64748b;font-size:13px;margin-bottom:12px">
-                <a href="/browse?q={_esc(domain)}" style="color:#64748b">{_esc(domain)}</a>
-                &middot; {time_ago(link.get('created_at'))}
-                {f' &middot; by {_esc(link.get("submitted_by") or "")}' if link.get("submitted_by") and link["submitted_by"] != "web" else ''}
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <div style="color:#64748b;font-size:13px">
+                    <a href="/browse?q={_esc(domain)}" style="color:#64748b">{_esc(domain)}</a>
+                    &middot; {time_ago(link.get('created_at'))}
+                    {f' &middot; by {_esc(link.get("submitted_by") or "")}' if link.get("submitted_by") and link["submitted_by"] != "web" else ''}
+                </div>
+                <a href="/api/random" class="btn btn-sm" style="background:#312e81;color:#a5b4fc;border:1px solid #4338ca;text-decoration:none;margin-left:auto;white-space:nowrap">&#127922; Next Random</a>
             </div>
             {img_html}
             <div style="display:flex;align-items:baseline;gap:0;flex-wrap:wrap;margin-top:8px">
@@ -730,7 +739,6 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         <div class="card">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
                 <h2 style="margin-bottom:0">Related Links</h2>
-                <a href="/api/random" class="btn btn-sm" style="background:#312e81;color:#a5b4fc;border:1px solid #4338ca;text-decoration:none">&#127922; Next Random</a>
             </div>
             {related_html}
         </div>"""

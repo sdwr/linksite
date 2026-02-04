@@ -14,7 +14,7 @@ from psycopg2.extras import RealDictCursor
 _pool = None
 _pool_lock = threading.Lock()
 
-DEFAULT_DATABASE_URL = 'postgresql://postgres.rsjcdwmgbxthsuyspndt:0JvN0xPnOFcxPbmm@aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require'
+DEFAULT_DATABASE_URL = 'postgresql://postgres:0JvN0xPnOFcxPbmm@db.rsjcdwmgbxthsuyspndt.supabase.co:5432/postgres'
 
 
 def get_pool(min_conn=2, max_conn=10):

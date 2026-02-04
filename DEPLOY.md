@@ -11,18 +11,16 @@ git add .
 git commit -m "your message"
 git push origin main
 
-# 3. Pull on sprite
-sprite exec -s linksite-dev -- git -C /home/sprite/linksite pull origin main
-
-# 4. Restart app
-sprite exec -s linksite-dev -- bash -c "cd /home/sprite/linksite && ./stop.sh && ./start.sh"
+# 3. Pull on sprite and restart service
+sprite exec -s linksite-dev -- bash -c "cd /home/sprite/linksite && git pull origin main"
+sprite exec -s linksite-dev -- sprite-env services restart linksite
 ```
 
 ## One-liner Deploy
 
 ```bash
 # After pushing locally:
-sprite exec -s linksite-dev -- bash -c "cd /home/sprite/linksite && git pull origin main && ./stop.sh && ./start.sh"
+sprite exec -s linksite-dev -- bash -c "cd /home/sprite/linksite && git pull origin main && sprite-env services restart linksite"
 ```
 
 ## URLs
@@ -30,9 +28,35 @@ sprite exec -s linksite-dev -- bash -c "cd /home/sprite/linksite && git pull ori
 - **Live app:** https://linksite-dev-bawuw.sprites.app/
 - **GitHub repo:** https://github.com/sdwr/linksite
 
+## Service Setup
+
+The app runs as a Sprite service, which means it:
+- Persists between reboots
+- Auto-starts when HTTP requests hit the URL
+- Uses the proper service manager
+
+### First-time setup (already done):
+```bash
+# Create run.sh wrapper and service
+sprite exec -s linksite-dev -- sprite-env services create linksite --cmd /home/sprite/linksite/run.sh --http-port 8080
+```
+
+### Service management:
+```bash
+sprite exec -s linksite-dev -- sprite-env services list
+sprite exec -s linksite-dev -- sprite-env services restart linksite
+sprite exec -s linksite-dev -- sprite-env services stop linksite
+sprite exec -s linksite-dev -- sprite-env services start linksite
+```
+
+### View logs:
+```bash
+sprite exec -s linksite-dev -- cat /.sprite/logs/services/linksite.log
+```
+
 ## Notes
 
 - Both local and sprite remotes have PAT auth baked into the URL
 - No interactive prompts needed for push/pull
-- `start.sh` runs backend (port 8000) and frontend (port 8080)
-- Frontend proxies to backend via Next.js rewrites
+- `run.sh` loads `.env` and runs the app
+- Old `start.sh`/`stop.sh` scripts are deprecated - use sprite-env services instead

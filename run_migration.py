@@ -1,29 +1,36 @@
 #!/usr/bin/env python3
-"""Run schema_ai_v2.sql migration using the existing DB connection."""
+"""Run the admin dashboard improvements migration."""
 
-import os
-import sys
+from db import execute
 
-# Add the app directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+print('Running admin dashboard improvements migration...')
 
-from db import get_conn
+# 1. Add reddit_api_stats column
+try:
+    execute('ALTER TABLE global_state ADD COLUMN IF NOT EXISTS reddit_api_stats JSONB DEFAULT %s::jsonb', ('{}',))
+    print('1. Added reddit_api_stats column to global_state')
+except Exception as e:
+    print(f'1. reddit_api_stats: {e}')
 
-# Read SQL file
-sql_file = os.path.join(os.path.dirname(__file__), "schema_ai_v2.sql")
-with open(sql_file, "r") as f:
-    sql = f.read()
+# 2. Add links_processed column
+try:
+    execute('ALTER TABLE job_runs ADD COLUMN IF NOT EXISTS links_processed JSONB DEFAULT %s::jsonb', ('[]',))
+    print('2. Added links_processed column to job_runs')
+except Exception as e:
+    print(f'2. links_processed: {e}')
 
-# Connect and execute
-print("Running migration using app DB connection...")
+# 3. Add index
+try:
+    execute('CREATE INDEX IF NOT EXISTS idx_job_runs_type_status ON job_runs(job_type, status)')
+    print('3. Added index idx_job_runs_type_status')
+except Exception as e:
+    print(f'3. index: {e}')
 
-with get_conn() as conn:
-    cur = conn.cursor()
-    try:
-        cur.execute(sql)
-        print("Migration completed successfully!")
-    except Exception as e:
-        print(f"Migration error: {e}")
-        sys.exit(1)
-    finally:
-        cur.close()
+# 4. Set default for started_at
+try:
+    execute('ALTER TABLE job_runs ALTER COLUMN started_at SET DEFAULT NOW()')
+    print('4. Set started_at default to NOW()')
+except Exception as e:
+    print(f'4. started_at: {e}')
+
+print('Migration complete!')

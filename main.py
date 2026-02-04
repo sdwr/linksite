@@ -1334,14 +1334,226 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
             reddit_html = f'<div class="card"><h2>&#129302; Reddit API</h2><div class="msg-err">Error loading status: {_esc(str(e))}</div></div>'
 
 
+        # --- Processing Queue Status ---
+        try:
+            # Count links by processing status (using direct count if available)
+            new_links = supabase.table("links").select("id").eq("processing_status", "new").execute()
+            processing_links = supabase.table("links").select("id").eq("processing_status", "processing").execute()
+            
+            # Priority breakdown
+            user_submitted = supabase.table("links").select("id").eq("source", "scratchpad").eq("processing_status", "new").execute()
+            
+            new_count = len(new_links.data or [])
+            processing_count = len(processing_links.data or [])
+            user_count = len(user_submitted.data or [])
+            rss_count = new_count - user_count
+            
+            queue_html = f"""<div class="card">
+                <h2>&#128203; Processing Queue</h2>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:12px">
+                    <div style="background:#f0fdf4;padding:12px;border-radius:8px;text-align:center">
+                        <div style="font-size:24px;font-weight:700;color:#166534">{new_count}</div>
+                        <div style="font-size:12px;color:#64748b">Pending</div>
+                    </div>
+                    <div style="background:#fef3c7;padding:12px;border-radius:8px;text-align:center">
+                        <div style="font-size:24px;font-weight:700;color:#92400e">{processing_count}</div>
+                        <div style="font-size:12px;color:#64748b">Processing</div>
+                    </div>
+                </div>
+                <div class="kv"><span class="label">User Submitted</span><span style="font-weight:600;color:#2563eb">{user_count}</span></div>
+                <div class="kv"><span class="label">RSS/Feed Links</span><span>{rss_count}</span></div>
+            </div>"""
+        except Exception as e:
+            queue_html = f'<div class="card"><h2>&#128203; Processing Queue</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
+
+        # --- API Health / Backoff Status ---
+        try:
+            from backoff import get_backoff_status
+            apis = ["anthropic", "reddit", "hackernews"]
+            api_rows = ""
+            
+            for api_name in apis:
+                status = get_backoff_status(api_name)
+                is_backing_off = status.get("is_backing_off", False)
+                failures = status.get("consecutive_failures", 0)
+                backoff_until = status.get("backoff_until")
+                last_error = status.get("last_error")
+                
+                status_color = "#dc2626" if is_backing_off else ("#f59e0b" if failures > 0 else "#16a34a")
+                status_text = "Backed off" if is_backing_off else ("Warning" if failures > 0 else "OK")
+                status_icon = "&#128308;" if is_backing_off else ("&#128992;" if failures > 0 else "&#128994;")
+                
+                backoff_info = ""
+                if is_backing_off and backoff_until:
+                    backoff_info = f'<br><span style="font-size:11px;color:#64748b">until {_esc(backoff_until[:19])}</span>'
+                
+                error_info = ""
+                if last_error:
+                    error_info = f'<br><span style="font-size:11px;color:#dc2626">{_esc(last_error[:50])}...</span>'
+                
+                api_rows += f"""<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f1f5f9">
+                    <div>
+                        <strong style="font-size:14px">{api_name.title()}</strong>
+                        {error_info}
+                    </div>
+                    <div style="text-align:right">
+                        <span style="color:{status_color};font-weight:600">{status_icon} {status_text}</span>
+                        {backoff_info}
+                        <br><span style="font-size:11px;color:#64748b">Failures: {failures}</span>
+                    </div>
+                </div>"""
+            
+            api_health_html = f"""<div class="card">
+                <h2>&#128161; API Health</h2>
+                {api_rows}
+            </div>"""
+        except Exception as e:
+            api_health_html = f'<div class="card"><h2>&#128161; API Health</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
+
+        # --- Monthly AI Budget ---
+        try:
+            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            usage_resp = supabase.table("ai_token_usage").select("estimated_cost_usd").gte("created_at", month_start.isoformat()).execute()
+            
+            total_cost = sum(float(r.get("estimated_cost_usd", 0) or 0) for r in (usage_resp.data or []))
+            budget = 50.0
+            percentage = min((total_cost / budget) * 100, 100)
+            warning = total_cost > (budget * 0.8)
+            
+            bar_color = "#dc2626" if warning else ("#f59e0b" if percentage > 50 else "#16a34a")
+            warning_text = '<span style="color:#dc2626;font-weight:600">&#9888; Budget Warning!</span>' if warning else ''
+            
+            budget_html = f"""<div class="card">
+                <h2>&#128176; Monthly AI Budget</h2>
+                <div style="font-size:28px;font-weight:700;color:#1e293b;margin-bottom:8px">${total_cost:.2f} <span style="font-size:16px;color:#64748b;font-weight:400">/ ${budget:.2f}</span></div>
+                <div style="background:#e2e8f0;border-radius:6px;height:16px;overflow:hidden;margin-bottom:8px">
+                    <div style="background:{bar_color};height:100%;width:{percentage:.1f}%;transition:width 0.3s"></div>
+                </div>
+                <div class="kv"><span class="label">Usage</span><span>{percentage:.1f}%</span></div>
+                <div class="kv"><span class="label">Remaining</span><span>${budget - total_cost:.2f}</span></div>
+                <div class="kv"><span class="label">Month</span><span>{now.strftime("%B %Y")}</span></div>
+                {warning_text}
+            </div>"""
+        except Exception as e:
+            budget_html = f'<div class="card"><h2>&#128176; Monthly AI Budget</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
+
+        # --- Recent Job Runs ---
+        try:
+            # Try job_runs first, then ai_runs
+            try:
+                runs_resp = supabase.table("job_runs").select("*").order("started_at", desc=True).limit(10).execute()
+                runs = runs_resp.data or []
+            except Exception:
+                runs_resp = supabase.table("ai_runs").select("id, type, status, results_count, created_at, completed_at, error").order("created_at", desc=True).limit(10).execute()
+                runs = []
+                for r in (runs_resp.data or []):
+                    duration = None
+                    if r.get("created_at") and r.get("completed_at"):
+                        try:
+                            start = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+                            end = datetime.fromisoformat(r["completed_at"].replace("Z", "+00:00"))
+                            duration = int((end - start).total_seconds())
+                        except Exception:
+                            pass
+                    runs.append({
+                        "type": r.get("type", "?"),
+                        "status": r.get("status", "?"),
+                        "started_at": r.get("created_at"),
+                        "duration_seconds": duration,
+                        "items_processed": r.get("results_count"),
+                    })
+            
+            runs_rows = ""
+            for run in runs[:10]:
+                r_type = _esc(run.get("type") or run.get("job_type") or "?")
+                r_status = run.get("status", "?")
+                r_started = (run.get("started_at") or run.get("created_at") or "")[:19]
+                r_duration = run.get("duration_seconds")
+                r_items = run.get("items_processed") or run.get("links_processed") or "-"
+                
+                status_colors = {"completed": "#16a34a", "failed": "#dc2626", "running": "#f59e0b"}
+                s_color = status_colors.get(r_status, "#64748b")
+                
+                dur_str = f"{r_duration}s" if r_duration is not None else "-"
+                
+                runs_rows += f"""<tr>
+                    <td style="font-weight:500">{r_type}</td>
+                    <td><span style="color:{s_color};font-weight:600">{_esc(r_status)}</span></td>
+                    <td style="font-size:12px;color:#64748b">{r_started}</td>
+                    <td style="text-align:center">{dur_str}</td>
+                    <td style="text-align:center">{r_items}</td>
+                </tr>"""
+            
+            if not runs_rows:
+                runs_rows = '<tr><td colspan="5" style="color:#94a3b8;text-align:center;padding:16px">No job runs yet</td></tr>'
+            
+            jobs_html = f"""<div class="card">
+                <h2>&#128203; Recent Job Runs</h2>
+                <div style="overflow-x:auto">
+                <table>
+                <thead><tr>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Started</th>
+                    <th style="text-align:center">Duration</th>
+                    <th style="text-align:center">Items</th>
+                </tr></thead>
+                <tbody>{runs_rows}</tbody>
+                </table>
+                </div>
+            </div>"""
+        except Exception as e:
+            jobs_html = f'<div class="card"><h2>&#128203; Recent Job Runs</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
+
+        # --- Manual Triggers ---
+        triggers_html = """<div class="card">
+            <h2>&#9889; Manual Triggers</h2>
+            <p style="font-size:13px;color:#64748b;margin-bottom:12px">Run jobs manually (results shown on refresh)</p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <button class="btn btn-sm" onclick="triggerJob('/api/admin/gather/hn', this)">&#129412; Gather HN</button>
+                <button class="btn btn-sm" onclick="triggerJob('/api/admin/gather/reddit', this)">&#129302; Gather Reddit</button>
+                <button class="btn btn-sm btn-primary" onclick="triggerJob('/api/admin/worker/run', this)">&#10024; Run Processing</button>
+            </div>
+            <div id="trigger-result" style="margin-top:12px;font-size:13px;color:#64748b"></div>
+        </div>
+        <script>
+        function triggerJob(url, btn) {
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            fetch(url, {method: 'POST'})
+                .then(r => r.json())
+                .then(d => {
+                    document.getElementById('trigger-result').innerHTML = 
+                        '<span style="color:#16a34a">&#10003; ' + (d.message || 'Job started') + '</span>';
+                    btn.disabled = false;
+                    btn.textContent = btn.textContent.replace('Running...', '');
+                    location.reload();
+                })
+                .catch(e => {
+                    document.getElementById('trigger-result').innerHTML = 
+                        '<span style="color:#dc2626">&#10007; Error: ' + e.message + '</span>';
+                    btn.disabled = false;
+                });
+        }
+        </script>"""
+
         # --- Assemble ---
         body = _messages(message, error)
         body += director_html
         body += '<div class="grid-2">'
         body += feeds_html
         body += weights_card
-        body += reddit_html
         body += '</div>'
+        body += '<div class="grid-2">'
+        body += queue_html
+        body += budget_html
+        body += '</div>'
+        body += '<div class="grid-2">'
+        body += api_health_html
+        body += triggers_html
+        body += '</div>'
+        body += jobs_html
+        body += reddit_html
 
         return HTMLResponse(_page("Admin", body))
     except Exception as e:

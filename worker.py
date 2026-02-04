@@ -306,7 +306,7 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
         if not budget_ok:
             print(f"[Worker] Monthly budget exceeded (${monthly_spend:.2f}/${MONTHLY_BUDGET_USD}), skipping AI processing")
         
-        # 2. Get batch of links
+        # 2. Get batch of links - first try 'new' links, then completed links needing work
         links = query(
             """
             SELECT id, url, title, description, content, summary, processing_status
@@ -317,6 +317,29 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
             """,
             (batch_size,)
         )
+        
+        if not links:
+            # No new links - look for completed links that might need more work
+            # (no summary and budget allows, or no external discussions checked)
+            links = query(
+                """
+                SELECT l.id, l.url, l.title, l.description, l.content, l.summary, l.processing_status
+                FROM links l
+                LEFT JOIN external_discussions ed ON ed.link_id = l.id
+                WHERE l.processing_status = 'completed'
+                  AND l.source NOT IN ('auto-parent', 'discussion-ref')
+                  AND (
+                    (l.summary IS NULL OR l.summary = '')
+                    OR ed.id IS NULL
+                  )
+                GROUP BY l.id
+                ORDER BY l.processing_priority DESC, l.created_at DESC
+                LIMIT %s
+                """,
+                (batch_size,)
+            )
+            if links:
+                print(f"[Worker] No new links, found {len(links)} completed links needing more work")
         
         if not links:
             print("[Worker] No links to process")
@@ -533,6 +556,30 @@ async def _worker_loop(interval_seconds: int = 180):
     print("[Worker] Background loop stopped")
 
 
+def reset_orphaned_processing_links():
+    """Reset any links stuck in 'processing' status back to 'new'.
+    
+    This handles links that were being processed when the app crashed.
+    Called on worker startup.
+    """
+    try:
+        result = execute(
+            """
+            UPDATE links 
+            SET processing_status = 'new'
+            WHERE processing_status = 'processing'
+            RETURNING id
+            """
+        )
+        # execute doesn't return rows, so let's query separately
+        stuck = query("SELECT COUNT(*) as cnt FROM links WHERE processing_status = 'processing'")
+        if stuck and stuck[0]['cnt'] > 0:
+            execute("UPDATE links SET processing_status = 'new' WHERE processing_status = 'processing'")
+            print(f"[Worker] Reset {stuck[0]['cnt']} orphaned 'processing' links back to 'new'")
+    except Exception as e:
+        print(f"[Worker] Error resetting orphaned links: {e}")
+
+
 def start_background_worker(interval_seconds: int = 180):
     """Start the background worker task."""
     global _worker_task, _worker_running
@@ -540,6 +587,9 @@ def start_background_worker(interval_seconds: int = 180):
     if _worker_running:
         print("[Worker] Already running")
         return
+    
+    # Reset any orphaned 'processing' links on startup
+    reset_orphaned_processing_links()
     
     _worker_running = True
     _worker_task = asyncio.create_task(_worker_loop(interval_seconds))

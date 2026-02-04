@@ -896,15 +896,25 @@ async def admin_links_needing_summary(
     }
 
 
+from pydantic import BaseModel
+from typing import List
+
+class SummaryUpdate(BaseModel):
+    summary: str
+
+class BatchSummaryItem(BaseModel):
+    id: int
+    summary: str
+
 @app.patch("/api/admin/link/{link_id}/summary")
 async def admin_set_link_summary(
     link_id: int,
-    summary: str,
+    body: SummaryUpdate,
     admin: str = Depends(verify_admin)
 ):
     """Set the summary for a link (for manual summarization)."""
     result = supabase.table("links").update({
-        "summary": summary
+        "summary": body.summary
     }).eq("id", link_id).execute()
     
     if result.data:
@@ -915,7 +925,7 @@ async def admin_set_link_summary(
 
 @app.post("/api/admin/summaries/batch")
 async def admin_batch_summaries(
-    summaries: list,
+    summaries: List[BatchSummaryItem],
     admin: str = Depends(verify_admin)
 ):
     """Set summaries for multiple links at once.
@@ -926,8 +936,8 @@ async def admin_batch_summaries(
     errors = []
     
     for item in summaries:
-        link_id = item.get("id")
-        summary = item.get("summary")
+        link_id = item.id
+        summary = item.summary
         
         if not link_id or not summary:
             errors.append(f"Invalid item: {item}")

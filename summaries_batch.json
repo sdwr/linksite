@@ -1,0 +1,10 @@
+[
+  {
+    "id": 241,
+    "summary": "A developer's journey switching from Windows to Linux after years of frustration with Windows 24H2 bugs, forced updates, and intrusive ads. The author installed CachyOS (Arch-based) and found that while Linux requires effort, it's now comparable to the effort needed to fight Windows. Covers browser support (excellent), development (native and superior), content creation (viable with compromises), music production (Bitwig as Ableton alternative with lower latency than Windows), and gaming (mostly working via Proton, with AMD performing on par with Windows)."
+  },
+  {
+    "id": 239,
+    "summary": "WhatsApp rebuilt their media consistency library from 160,000 lines of C++ to 90,000 lines of Rust, creating what they claim is the largest Rust deployment to end users globally. The library validates media files to detect malformed content that could exploit vulnerabilities in OS-level parsers. Rust's memory safety eliminates an entire class of security bugs, and the rewrite showed performance improvements over the original C++. Now deployed to billions of devices across Android, iOS, Mac, Web, and wearables."
+  }
+]

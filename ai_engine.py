@@ -1,9 +1,16 @@
 """
-AI Content Engine â€” Core Logic
+AI Content Engine — Core Logic
 
 Integrates with the Linksite FastAPI app to discover and enrich links
 using Claude AI models. All operations are tracked in ai_runs and
 ai_generated_content tables.
+
+Features:
+- Link discovery from web search and Hacker News
+- Summary generation for links
+- AI comments from multiple personas
+- Token usage tracking
+- Prioritized enrichment queue
 
 Usage:
     from ai_engine import AIEngine
@@ -12,10 +19,13 @@ Usage:
     # Discover new links
     result = await engine.discover_links(topic="AI safety", count=5)
     
+    # Generate summary for a link
+    result = await engine.generate_summary(link_id=123)
+    
     # Enrich a single link
     result = await engine.enrich_link(link_id=123)
     
-    # Batch enrich
+    # Batch enrich (with prioritization)
     result = await engine.enrich_batch(limit=10)
 """
 
@@ -23,7 +33,7 @@ import os
 import json
 import asyncio
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import uuid4
 
@@ -36,15 +46,27 @@ from prompts import (
     tag_suggestions_prompt,
     summary_prompt,
     PERSONAS,
+    PROMPT_FUNCTIONS,
+    get_persona,
+    get_active_personas,
+    build_comment_prompt,
 )
 
 # ============================================================
-# Model Configuration
+# Model Configuration & Pricing
 # ============================================================
 
 MODELS = {
     "haiku": "claude-3-5-haiku-20241022",
     "sonnet": "claude-sonnet-4-20250514",
+}
+
+# Pricing per 1M tokens (as of 2024)
+MODEL_PRICING = {
+    "claude-3-5-haiku-20241022": {"input": 0.25, "output": 1.25},
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
+    # Fallback for unknown models
+    "default": {"input": 1.00, "output": 5.00},
 }
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
@@ -63,6 +85,8 @@ class AIEngine:
         self.brave_key = brave_api_key or os.getenv("BRAVE_API_KEY", "")
         self.vectorize = vectorize_fn  # Optional: function to generate embeddings
         self._http = None
+        self._personas_cache = None
+        self._personas_cache_time = 0
 
     @property
     def http(self):
@@ -76,12 +100,59 @@ class AIEngine:
             self._http = None
 
     # --------------------------------------------------------
+    # Persona Management
+    # --------------------------------------------------------
+
+    def _get_personas(self, force_refresh: bool = False) -> dict:
+        """Get personas, using DB config if available, else defaults."""
+        now = datetime.now(timezone.utc).timestamp()
+        
+        # Cache for 5 minutes
+        if not force_refresh and self._personas_cache and (now - self._personas_cache_time) < 300:
+            return self._personas_cache
+        
+        personas = dict(PERSONAS)  # Start with defaults
+        
+        try:
+            resp = self.supabase.table("ai_personas").select("*").eq("is_active", True).execute()
+            if resp.data:
+                for row in resp.data:
+                    pid = row.get("id")
+                    if pid:
+                        # Merge DB config with defaults
+                        base = personas.get(pid, {})
+                        prompt_fn = PROMPT_FUNCTIONS.get(pid)
+                        
+                        personas[pid] = {
+                            "id": pid,
+                            "author": f"ai-{pid}",
+                            "prompt_fn": prompt_fn,
+                            "model": row.get("model") or base.get("model", "haiku"),
+                            "description": row.get("description") or base.get("description", ""),
+                            "priority": row.get("priority") or base.get("priority", 50),
+                            "system_prompt": row.get("system_prompt"),
+                            "user_prompt_template": row.get("user_prompt_template"),
+                        }
+        except Exception as e:
+            print(f"[AIEngine] Failed to load personas from DB: {e}")
+        
+        self._personas_cache = personas
+        self._personas_cache_time = now
+        return personas
+
+    # --------------------------------------------------------
     # Claude API
     # --------------------------------------------------------
 
     async def _call_claude(self, prompt: str, model_key: str = "haiku",
-                           max_tokens: int = 1024, system: str = None) -> dict:
-        """Call Claude API and return response + token usage."""
+                           max_tokens: int = 1024, system: str = None,
+                           operation_type: str = None, link_id: int = None,
+                           run_id: str = None) -> dict:
+        """
+        Call Claude API and return response + token usage.
+        
+        Tracks token usage in ai_token_usage table.
+        """
         model = MODELS.get(model_key, MODELS["haiku"])
         
         messages = [{"role": "user", "content": prompt}]
@@ -109,10 +180,36 @@ class AIEngine:
             if block.get("type") == "text":
                 text += block["text"]
 
+        # Extract detailed usage
         usage = data.get("usage", {})
-        tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        total_tokens = input_tokens + output_tokens
+        
+        # Calculate estimated cost
+        pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
+        estimated_cost = (input_tokens * pricing["input"] + output_tokens * pricing["output"]) / 1_000_000
 
-        return {"text": text, "tokens": tokens, "model": model_key}
+        # Track token usage
+        self._record_token_usage(
+            run_id=run_id,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            estimated_cost=estimated_cost,
+            operation_type=operation_type,
+            link_id=link_id,
+        )
+
+        return {
+            "text": text,
+            "tokens": total_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost_usd": estimated_cost,
+            "model": model_key,
+        }
 
     def _parse_json_response(self, text: str) -> any:
         """Extract JSON from a Claude response (handles markdown code blocks)."""
@@ -136,6 +233,76 @@ class AIEngine:
                     except json.JSONDecodeError:
                         continue
             return None
+
+    # --------------------------------------------------------
+    # Token Usage Tracking
+    # --------------------------------------------------------
+
+    def _record_token_usage(self, run_id: str, model: str, input_tokens: int,
+                            output_tokens: int, total_tokens: int,
+                            estimated_cost: float, operation_type: str = None,
+                            link_id: int = None):
+        """Record detailed token usage to the database."""
+        try:
+            self.supabase.table("ai_token_usage").insert({
+                "run_id": run_id,
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "estimated_cost_usd": estimated_cost,
+                "operation_type": operation_type,
+                "link_id": link_id,
+            }).execute()
+        except Exception as e:
+            # Don't fail the main operation if tracking fails
+            print(f"[AIEngine] Token usage tracking failed: {e}")
+
+    async def get_token_usage_stats(self, days: int = 30) -> dict:
+        """Get token usage statistics for the specified period."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        
+        try:
+            resp = self.supabase.table("ai_token_usage").select(
+                "model, input_tokens, output_tokens, total_tokens, estimated_cost_usd, operation_type"
+            ).gte("created_at", cutoff).execute()
+            
+            records = resp.data or []
+            
+            total_input = sum(r.get("input_tokens", 0) for r in records)
+            total_output = sum(r.get("output_tokens", 0) for r in records)
+            total_cost = sum(float(r.get("estimated_cost_usd", 0)) for r in records)
+            
+            by_model = {}
+            by_operation = {}
+            
+            for r in records:
+                model = r.get("model", "unknown")
+                if model not in by_model:
+                    by_model[model] = {"tokens": 0, "cost": 0, "calls": 0}
+                by_model[model]["tokens"] += r.get("total_tokens", 0)
+                by_model[model]["cost"] += float(r.get("estimated_cost_usd", 0))
+                by_model[model]["calls"] += 1
+                
+                op = r.get("operation_type", "unknown")
+                if op not in by_operation:
+                    by_operation[op] = {"tokens": 0, "cost": 0, "calls": 0}
+                by_operation[op]["tokens"] += r.get("total_tokens", 0)
+                by_operation[op]["cost"] += float(r.get("estimated_cost_usd", 0))
+                by_operation[op]["calls"] += 1
+            
+            return {
+                "period_days": days,
+                "total_calls": len(records),
+                "total_input_tokens": total_input,
+                "total_output_tokens": total_output,
+                "total_tokens": total_input + total_output,
+                "total_cost_usd": round(total_cost, 4),
+                "by_model": by_model,
+                "by_operation": by_operation,
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     # --------------------------------------------------------
     # Run Tracking
@@ -171,7 +338,7 @@ class AIEngine:
 
     def _record_content(self, run_id: str, link_id: int, content_type: str,
                         content: str, author: str = None, model_used: str = None,
-                        tokens_used: int = 0):
+                        tokens_used: int = 0, persona_id: str = None):
         """Record a piece of generated content."""
         self.supabase.table("ai_generated_content").insert({
             "run_id": run_id,
@@ -181,6 +348,7 @@ class AIEngine:
             "author": author,
             "model_used": model_used,
             "tokens_used": tokens_used,
+            "persona_id": persona_id,
         }).execute()
 
     # --------------------------------------------------------
@@ -250,6 +418,225 @@ class AIEngine:
         return items
 
     # --------------------------------------------------------
+    # Prioritization
+    # --------------------------------------------------------
+
+    def _calculate_priority_score(self, link: dict) -> float:
+        """
+        Calculate priority score for enrichment.
+        
+        Higher score = should be processed first.
+        
+        Factors:
+        - Engagement (direct_score, times_shown)
+        - Recency (created_at)
+        - Existing enrichment (lower priority if already has content)
+        """
+        score = 0.0
+        
+        # Engagement boost (up to 50 points)
+        direct_score = link.get("direct_score") or 0
+        times_shown = link.get("times_shown") or 0
+        view_count = link.get("view_count") or 0
+        
+        score += min(direct_score * 5, 25)  # Up to 25 from votes
+        score += min(times_shown * 2, 15)   # Up to 15 from being featured
+        score += min(view_count * 0.5, 10)  # Up to 10 from views
+        
+        # Recency boost (up to 40 points)
+        created_at = link.get("created_at")
+        if created_at:
+            try:
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                age_days = (datetime.now(timezone.utc) - created_at).days
+                
+                if age_days <= 1:
+                    score += 40  # Very recent
+                elif age_days <= 3:
+                    score += 30
+                elif age_days <= 7:
+                    score += 20
+                elif age_days <= 30:
+                    score += 10
+                # Older than 30 days gets no recency boost
+            except Exception:
+                pass
+        
+        # Penalty for already enriched content
+        if link.get("summary"):
+            score -= 10
+        if link.get("description") and len(link.get("description", "")) > 50:
+            score -= 5
+        
+        return score
+
+    def _get_prioritized_links(self, limit: int = 20, needs_summary: bool = True,
+                                needs_comments: bool = True) -> list[dict]:
+        """
+        Get links prioritized for enrichment.
+        
+        Returns links sorted by priority score (highest first).
+        """
+        # Fetch recent links with engagement data
+        query = self.supabase.table("links").select(
+            "id, url, title, description, content, summary, source, "
+            "direct_score, times_shown, view_count, created_at"
+        ).neq("source", "auto-parent").order(
+            "created_at", desc=True
+        ).limit(limit * 5)  # Fetch extra for filtering/sorting
+        
+        resp = query.execute()
+        links = resp.data or []
+        
+        # Filter based on what's needed
+        candidates = []
+        for link in links:
+            needs_work = False
+            
+            if needs_summary and not link.get("summary"):
+                needs_work = True
+            
+            if needs_comments:
+                # Check for existing AI comments
+                notes = self.supabase.table("notes").select("id").eq(
+                    "link_id", link["id"]
+                ).ilike("author", "ai-%").limit(1).execute()
+                if not notes.data:
+                    needs_work = True
+            
+            if needs_work:
+                link["_priority"] = self._calculate_priority_score(link)
+                candidates.append(link)
+        
+        # Sort by priority (highest first)
+        candidates.sort(key=lambda x: x.get("_priority", 0), reverse=True)
+        
+        return candidates[:limit]
+
+    # --------------------------------------------------------
+    # Summary Generation
+    # --------------------------------------------------------
+
+    async def generate_summary(self, link_id: int) -> dict:
+        """
+        Generate a summary for a single link.
+        
+        This is separate from comments — summaries are stored on the link itself.
+        
+        Returns:
+            {"link_id": int, "summary": str, "tokens": int, "error": str?}
+        """
+        params = {"link_id": link_id, "type": "summary"}
+        run_id = self._create_run("enrich", params)
+        total_tokens = 0
+        model_used = "haiku"
+
+        try:
+            # Fetch the link
+            link_resp = self.supabase.table("links").select(
+                "id, url, title, description, content, summary"
+            ).eq("id", link_id).execute()
+
+            if not link_resp.data:
+                raise ValueError(f"Link {link_id} not found")
+
+            link = link_resp.data[0]
+            
+            # Skip if already has a summary
+            if link.get("summary") and len(link.get("summary", "")) > 20:
+                self._complete_run(run_id, 0, 0, model_used)
+                return {
+                    "link_id": link_id,
+                    "summary": link["summary"],
+                    "skipped": True,
+                    "reason": "Already has summary",
+                }
+
+            title = link.get("title") or ""
+            url = link.get("url") or ""
+            content = link.get("content") or link.get("description") or ""
+
+            if not title and not content:
+                raise ValueError(f"Link {link_id} has no title or content to summarize")
+
+            # Generate summary
+            prompt = summary_prompt(title, url, content)
+            result = await self._call_claude(
+                prompt, "haiku", max_tokens=300,
+                operation_type="summary", link_id=link_id, run_id=run_id
+            )
+            total_tokens = result["tokens"]
+
+            summary_text = result["text"].strip()
+            if summary_text and len(summary_text) > 20:
+                # Store summary on the link
+                self.supabase.table("links").update(
+                    {"summary": summary_text}
+                ).eq("id", link_id).execute()
+
+                # Record in ai_generated_content
+                self._record_content(
+                    run_id, link_id, "summary", summary_text,
+                    "ai-summary", "haiku", result["tokens"], "summary"
+                )
+
+                self._complete_run(run_id, 1, total_tokens, model_used)
+                return {
+                    "link_id": link_id,
+                    "summary": summary_text,
+                    "tokens": total_tokens,
+                    "cost_usd": result.get("estimated_cost_usd", 0),
+                }
+
+            raise ValueError("Generated summary was too short or empty")
+
+        except Exception as e:
+            self._complete_run(run_id, 0, total_tokens, model_used, str(e))
+            return {
+                "link_id": link_id,
+                "summary": None,
+                "error": str(e),
+            }
+
+    async def generate_summaries_batch(self, limit: int = 10) -> dict:
+        """
+        Generate summaries for links that need them.
+        
+        Uses prioritization to process most important links first.
+        """
+        # Get prioritized links needing summaries
+        candidates = self._get_prioritized_links(limit, needs_summary=True, needs_comments=False)
+        
+        results = []
+        total_tokens = 0
+        total_cost = 0.0
+        
+        for link in candidates:
+            result = await self.generate_summary(link["id"])
+            results.append({
+                "id": link["id"],
+                "title": link.get("title", ""),
+                "priority": link.get("_priority", 0),
+                "summary": result.get("summary"),
+                "error": result.get("error"),
+            })
+            
+            total_tokens += result.get("tokens", 0)
+            total_cost += result.get("cost_usd", 0)
+            
+            # Small delay between calls
+            await asyncio.sleep(0.3)
+        
+        return {
+            "processed": len(results),
+            "successful": sum(1 for r in results if r.get("summary")),
+            "total_tokens": total_tokens,
+            "total_cost_usd": round(total_cost, 4),
+            "links": results,
+        }
+
+    # --------------------------------------------------------
     # Link Discovery
     # --------------------------------------------------------
 
@@ -279,7 +666,10 @@ class AIEngine:
                 hn_items = await self._fetch_hn_top(30)
                 if hn_items:
                     prompt = discovery_hn_prompt(hn_items)
-                    result = await self._call_claude(prompt, "haiku", max_tokens=2048)
+                    result = await self._call_claude(
+                        prompt, "haiku", max_tokens=2048,
+                        operation_type="discovery", run_id=run_id
+                    )
                     total_tokens += result["tokens"]
                     parsed = self._parse_json_response(result["text"])
                     if parsed and isinstance(parsed, list):
@@ -290,7 +680,10 @@ class AIEngine:
                 search_results = await self._brave_search(topic, count=15)
                 if search_results:
                     prompt = discovery_filter_prompt(topic, search_results)
-                    result = await self._call_claude(prompt, "haiku", max_tokens=2048)
+                    result = await self._call_claude(
+                        prompt, "haiku", max_tokens=2048,
+                        operation_type="discovery", run_id=run_id
+                    )
                     total_tokens += result["tokens"]
                     parsed = self._parse_json_response(result["text"])
                     if parsed and isinstance(parsed, list):
@@ -305,7 +698,10 @@ Return a JSON array:
 ```
 
 Focus on well-known, real URLs from reputable sources. Return ONLY the JSON array."""
-                    result = await self._call_claude(prompt, "sonnet", max_tokens=2048)
+                    result = await self._call_claude(
+                        prompt, "sonnet", max_tokens=2048,
+                        operation_type="discovery", run_id=run_id
+                    )
                     total_tokens += result["tokens"]
                     model_used = "sonnet"
                     parsed = self._parse_json_response(result["text"])
@@ -317,7 +713,10 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
                 hn_items = await self._fetch_hn_top(30)
                 if hn_items:
                     prompt = discovery_hn_prompt(hn_items)
-                    result = await self._call_claude(prompt, "haiku", max_tokens=2048)
+                    result = await self._call_claude(
+                        prompt, "haiku", max_tokens=2048,
+                        operation_type="discovery", run_id=run_id
+                    )
                     total_tokens += result["tokens"]
                     parsed = self._parse_json_response(result["text"])
                     if parsed and isinstance(parsed, list):
@@ -377,11 +776,11 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
             return {"run_id": run_id, "discovered": 0, "links": [], "error": str(e)}
 
     # --------------------------------------------------------
-    # Link Enrichment
+    # Link Enrichment (Comments)
     # --------------------------------------------------------
 
-    async def enrich_link(self, link_id: int,
-                          types: list[str] = None) -> dict:
+    async def enrich_link(self, link_id: int, types: list[str] = None,
+                          personas: list[str] = None) -> dict:
         """
         Enrich a single link with AI-generated content.
         
@@ -389,7 +788,9 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
             link_id: The link to enrich
             types: List of content types to generate.
                    Options: "description", "tags", "comments", "summary"
-                   Default: all types
+                   Default: ["description", "tags", "comments"]
+            personas: List of persona IDs to use for comments.
+                     If None, auto-selects based on content.
         
         Returns:
             {"run_id": str, "link_id": int, "generated": {...}}
@@ -397,7 +798,7 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
         if types is None:
             types = ["description", "tags", "comments"]
 
-        params = {"link_id": link_id, "types": types}
+        params = {"link_id": link_id, "types": types, "personas": personas}
         run_id = self._create_run("enrich", params)
         total_tokens = 0
         model_used = "haiku"
@@ -406,7 +807,7 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
         try:
             # Fetch the link
             link_resp = self.supabase.table("links").select(
-                "id, url, title, description, content"
+                "id, url, title, description, content, summary"
             ).eq("id", link_id).execute()
 
             if not link_resp.data:
@@ -429,10 +830,20 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
             except Exception:
                 pass
 
+            # --- Generate Summary ---
+            if "summary" in types and (not link.get("summary") or len(link.get("summary", "")) < 20):
+                result = await self.generate_summary(link_id)
+                if result.get("summary"):
+                    generated["summary"] = result["summary"]
+                    total_tokens += result.get("tokens", 0)
+
             # --- Generate Description ---
             if "description" in types and (not link.get("description") or len(link.get("description", "")) < 50):
                 prompt = description_prompt(title, url, content)
-                result = await self._call_claude(prompt, "haiku", max_tokens=300)
+                result = await self._call_claude(
+                    prompt, "haiku", max_tokens=300,
+                    operation_type="description", link_id=link_id, run_id=run_id
+                )
                 total_tokens += result["tokens"]
 
                 desc = result["text"].strip()
@@ -451,7 +862,10 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
             # --- Generate Tags ---
             if "tags" in types:
                 prompt = tag_suggestions_prompt(title, url, content, existing_tags)
-                result = await self._call_claude(prompt, "haiku", max_tokens=200)
+                result = await self._call_claude(
+                    prompt, "haiku", max_tokens=200,
+                    operation_type="tags", link_id=link_id, run_id=run_id
+                )
                 total_tokens += result["tokens"]
 
                 tags = self._parse_json_response(result["text"])
@@ -494,51 +908,15 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
 
             # --- Generate Comments ---
             if "comments" in types:
-                generated_comments = []
-
-                # Pick 1-2 comment perspectives based on content type
-                perspectives = self._pick_perspectives(title, content)
-
-                for persona_key in perspectives:
-                    persona = PERSONAS.get(persona_key)
-                    if not persona:
-                        continue
-
-                    # Check if we already have a comment from this persona
-                    existing_notes = self.supabase.table("notes").select("id").eq(
-                        "link_id", link_id
-                    ).eq("author", persona["author"]).execute()
-
-                    if existing_notes.data:
-                        continue  # Skip â€” already commented
-
-                    prompt = persona["prompt_fn"](title, url, content)
-                    model_key = persona.get("model", "haiku")
-                    result = await self._call_claude(prompt, model_key, max_tokens=800)
-                    total_tokens += result["tokens"]
-                    if model_key in ("sonnet",):
-                        model_used = "sonnet"
-
-                    comment_text = result["text"].strip()
-                    if comment_text and len(comment_text) > 30:
-                        # Add as a note
-                        self.supabase.table("notes").insert({
-                            "link_id": link_id,
-                            "author": persona["author"],
-                            "text": comment_text,
-                        }).execute()
-
-                        self._record_content(
-                            run_id, link_id, "comment", comment_text,
-                            persona["author"], model_key, result["tokens"]
-                        )
-                        generated_comments.append({
-                            "author": persona["author"],
-                            "text": comment_text[:200] + "..." if len(comment_text) > 200 else comment_text,
-                        })
-
+                generated_comments = await self._generate_comments(
+                    run_id, link_id, title, url, content, personas
+                )
                 if generated_comments:
                     generated["comments"] = generated_comments
+                    for c in generated_comments:
+                        total_tokens += c.get("tokens", 0)
+                        if c.get("model") == "sonnet":
+                            model_used = "sonnet"
 
             results_count = sum(1 for v in generated.values() if v)
             self._complete_run(run_id, results_count, total_tokens, model_used)
@@ -558,34 +936,139 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
                 "error": str(e),
             }
 
+    async def _generate_comments(self, run_id: str, link_id: int,
+                                  title: str, url: str, content: str,
+                                  requested_personas: list[str] = None) -> list[dict]:
+        """
+        Generate comments from AI personas.
+        
+        Args:
+            run_id: The current run ID
+            link_id: Link to comment on
+            title, url, content: Link content
+            requested_personas: Specific personas to use, or None for auto-select
+        
+        Returns:
+            List of generated comments with metadata
+        """
+        all_personas = self._get_personas()
+        
+        # Determine which personas to use
+        if requested_personas:
+            persona_ids = requested_personas
+        else:
+            persona_ids = self._pick_perspectives(title, content)
+        
+        generated_comments = []
+        
+        for persona_id in persona_ids:
+            persona = all_personas.get(persona_id)
+            if not persona:
+                continue
+            
+            author = persona.get("author", f"ai-{persona_id}")
+            
+            # Check if we already have a comment from this persona
+            existing_notes = self.supabase.table("notes").select("id").eq(
+                "link_id", link_id
+            ).eq("author", author).execute()
+
+            if existing_notes.data:
+                continue  # Skip — already commented
+
+            # Build prompt
+            prompt_fn = persona.get("prompt_fn")
+            if not prompt_fn:
+                prompt_fn = PROMPT_FUNCTIONS.get(persona_id)
+            
+            if not prompt_fn:
+                continue
+            
+            prompt = prompt_fn(title, url, content)
+            model_key = persona.get("model", "haiku")
+            system_prompt = persona.get("system_prompt")
+            
+            result = await self._call_claude(
+                prompt, model_key, max_tokens=800,
+                system=system_prompt,
+                operation_type="comment", link_id=link_id, run_id=run_id
+            )
+
+            comment_text = result["text"].strip()
+            if comment_text and len(comment_text) > 30:
+                # Add as a note
+                self.supabase.table("notes").insert({
+                    "link_id": link_id,
+                    "author": author,
+                    "text": comment_text,
+                    "persona_id": persona_id,
+                }).execute()
+
+                self._record_content(
+                    run_id, link_id, "comment", comment_text,
+                    author, model_key, result["tokens"], persona_id
+                )
+                
+                generated_comments.append({
+                    "author": author,
+                    "persona_id": persona_id,
+                    "text": comment_text[:200] + "..." if len(comment_text) > 200 else comment_text,
+                    "tokens": result["tokens"],
+                    "model": model_key,
+                })
+
+        return generated_comments
+
     def _pick_perspectives(self, title: str, content: str) -> list[str]:
         """Pick which comment perspectives to use based on content type."""
         text = f"{title} {content}".lower()
 
-        perspectives = ["summary"]  # Always include a summary
+        perspectives = []  # Don't always include summary as a comment
 
         # Technical content gets technical analysis
         tech_keywords = ["algorithm", "api", "code", "framework", "model", "architecture",
                          "system", "performance", "benchmark", "protocol", "database",
-                         "machine learning", "neural", "compiler", "runtime"]
+                         "machine learning", "neural", "compiler", "runtime", "kubernetes",
+                         "docker", "rust", "python", "javascript", "typescript"]
         if any(kw in text for kw in tech_keywords):
             perspectives.append("technical")
 
         # Business/product content gets business analysis
         biz_keywords = ["startup", "funding", "market", "revenue", "company", "product",
-                        "launch", "acquisition", "ipo", "valuation", "growth", "enterprise"]
+                        "launch", "acquisition", "ipo", "valuation", "growth", "enterprise",
+                        "series a", "seed round", "venture", "profit"]
         if any(kw in text for kw in biz_keywords):
             perspectives.append("business")
 
         # Controversial or opinion content gets contrarian view
         opinion_keywords = ["should", "must", "need to", "wrong", "right", "best", "worst",
-                           "always", "never", "future of", "death of", "end of", "revolution"]
+                           "always", "never", "future of", "death of", "end of", "revolution",
+                           "controversial", "debate", "opinion"]
         if any(kw in text for kw in opinion_keywords):
             perspectives.append("contrarian")
 
-        # If we only have summary, add at least one analysis
+        # Educational/tutorial content gets curious newcomer
+        edu_keywords = ["how to", "tutorial", "guide", "introduction", "beginner",
+                        "learn", "explained", "basics", "fundamentals"]
+        if any(kw in text for kw in edu_keywords):
+            perspectives.append("curious")
+
+        # Historical/retrospective content gets historian
+        hist_keywords = ["history", "retrospective", "years ago", "evolution",
+                         "origin", "early days", "pioneered", "invented"]
+        if any(kw in text for kw in hist_keywords):
+            perspectives.append("historian")
+
+        # If nothing specific matched, add technical + one other
+        if len(perspectives) == 0:
+            perspectives = ["technical"]
+
+        # Add a second perspective if we only have one
         if len(perspectives) == 1:
-            perspectives.append("technical")
+            if "technical" not in perspectives:
+                perspectives.append("technical")
+            else:
+                perspectives.append("contrarian")
 
         # Cap at 3 perspectives to control costs
         return perspectives[:3]
@@ -599,33 +1082,34 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
         """
         Find links needing enrichment and process them.
         
+        Uses priority scoring to process most important links first.
+        
         Prioritizes:
-        1. Links with no description
-        2. Links with no tags
-        3. Links with no AI comments
-        4. Most recently added first
+        1. Popular links (higher engagement/votes)
+        2. Recent links
+        3. Links missing content
         
         Args:
             limit: Max links to process
             types: Content types to generate (default: all)
         
         Returns:
-            {"run_id": str, "enriched": int, "skipped": int, "links": [...]}
+            {"enriched": int, "skipped": int, "links": [...]}
         """
         if types is None:
             types = ["description", "tags", "comments"]
 
-        # Find links that need enrichment
-        # Strategy: get recent links and check what they're missing
-        links_resp = self.supabase.table("links").select(
-            "id, url, title, description, content, source"
-        ).neq("source", "auto-parent").order(
-            "created_at", desc=True
-        ).limit(limit * 3).execute()  # Fetch extra to account for skips
+        # Use prioritization system
+        candidates = self._get_prioritized_links(
+            limit=limit,
+            needs_summary="summary" in types,
+            needs_comments="comments" in types,
+        )
 
-        candidates = []
-        for link in (links_resp.data or []):
+        results = []
+        for link in candidates:
             needs = []
+            
             if "description" in types and (not link.get("description") or len(link.get("description", "")) < 50):
                 needs.append("description")
             if "tags" in types:
@@ -642,22 +1126,17 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
                 ).ilike("author", "ai-%").limit(1).execute()
                 if not notes.data:
                     needs.append("comments")
+            if "summary" in types and not link.get("summary"):
+                needs.append("summary")
 
-            if needs:
-                candidates.append({"link": link, "needs": needs})
+            if not needs:
+                continue
 
-        # Process up to `limit` candidates
-        candidates = candidates[:limit]
-
-        results = []
-        for c in candidates:
-            result = await self.enrich_link(
-                c["link"]["id"],
-                types=c["needs"],
-            )
+            result = await self.enrich_link(link["id"], types=needs)
             results.append({
-                "id": c["link"]["id"],
-                "title": c["link"].get("title", ""),
+                "id": link["id"],
+                "title": link.get("title", ""),
+                "priority": link.get("_priority", 0),
                 "generated": list(result.get("generated", {}).keys()),
                 "error": result.get("error"),
             })
@@ -666,12 +1145,10 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
             await asyncio.sleep(0.5)
 
         enriched = sum(1 for r in results if not r.get("error"))
-        skipped = len(links_resp.data or []) - len(candidates)
-
+        
         return {
             "enriched": enriched,
-            "skipped": skipped,
-            "total_checked": len(links_resp.data or []),
+            "total_processed": len(results),
             "links": results,
         }
 
@@ -699,19 +1176,26 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
 
         # Content breakdown
         content_resp = self.supabase.table("ai_generated_content").select(
-            "content_type, model_used"
+            "content_type, model_used, persona_id"
         ).execute()
         content = content_resp.data or []
 
         content_by_type = {}
         model_usage = {}
+        persona_usage = {}
         for c in content:
             ct = c.get("content_type", "unknown")
             content_by_type[ct] = content_by_type.get(ct, 0) + 1
             m = c.get("model_used", "unknown")
             model_usage[m] = model_usage.get(m, 0) + 1
+            p = c.get("persona_id")
+            if p:
+                persona_usage[p] = persona_usage.get(p, 0) + 1
 
         last_run = max((r.get("created_at", "") for r in runs), default=None) if runs else None
+
+        # Get token usage stats
+        token_stats = await self.get_token_usage_stats(days=30)
 
         return {
             "total_runs": total_runs,
@@ -722,9 +1206,11 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
             "total_tokens": total_tokens,
             "content_by_type": content_by_type,
             "model_usage": model_usage,
+            "persona_usage": persona_usage,
             "avg_per_discover_run": round(total_discovered / max(len(discover_runs), 1), 1),
             "avg_per_enrich_run": round(total_enriched / max(len(enrich_runs), 1), 1),
             "last_run": last_run,
+            "token_usage_30d": token_stats,
         }
 
     async def get_runs(self, limit: int = 20, run_type: str = None) -> list[dict]:
@@ -738,3 +1224,33 @@ Focus on well-known, real URLs from reputable sources. Return ONLY the JSON arra
 
         resp = query.execute()
         return resp.data or []
+
+    async def get_personas(self) -> list[dict]:
+        """Get all configured personas with usage stats."""
+        personas = self._get_personas(force_refresh=True)
+        
+        # Get usage counts
+        content_resp = self.supabase.table("ai_generated_content").select(
+            "persona_id"
+        ).execute()
+        
+        usage_counts = {}
+        for c in (content_resp.data or []):
+            p = c.get("persona_id")
+            if p:
+                usage_counts[p] = usage_counts.get(p, 0) + 1
+        
+        result = []
+        for pid, persona in personas.items():
+            result.append({
+                "id": pid,
+                "author": persona.get("author"),
+                "model": persona.get("model"),
+                "description": persona.get("description"),
+                "priority": persona.get("priority"),
+                "has_custom_prompt": bool(persona.get("system_prompt")),
+                "usage_count": usage_counts.get(pid, 0),
+            })
+        
+        result.sort(key=lambda x: x.get("priority", 0), reverse=True)
+        return result

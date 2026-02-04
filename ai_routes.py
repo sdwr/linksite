@@ -1,5 +1,5 @@
 """
-AI Content Engine â€” FastAPI Routes
+AI Content Engine — FastAPI Routes
 
 Mount these routes on the main FastAPI app to expose the AI engine
 as HTTP endpoints.
@@ -29,11 +29,26 @@ class DiscoverRequest(BaseModel):
 
 class EnrichRequest(BaseModel):
     limit: int = 10
-    types: Optional[List[str]] = None  # ["description", "tags", "comments"]
+    types: Optional[List[str]] = None  # ["description", "tags", "comments", "summary"]
 
 
 class EnrichSingleRequest(BaseModel):
     types: Optional[List[str]] = None
+    personas: Optional[List[str]] = None  # Specific personas to use for comments
+
+
+class SummaryBatchRequest(BaseModel):
+    limit: int = 10
+
+
+class PersonaUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    user_prompt_template: Optional[str] = None
+    model: Optional[str] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
 
 
 # ============================================================
@@ -61,7 +76,7 @@ def create_ai_router(supabase_client, anthropic_api_key: str = None,
         """
         Discover new links to add to the site.
         
-        Runs in the background â€” returns immediately with a run_id.
+        Runs in the background — returns immediately with a run_id.
         Check /api/ai/runs/{run_id} for results.
         """
         if body.count > 20:
@@ -91,14 +106,52 @@ def create_ai_router(supabase_client, anthropic_api_key: str = None,
         }
 
     # --------------------------------------------------------
+    # Summary Generation
+    # --------------------------------------------------------
+
+    @router.post("/summary/{link_id}")
+    async def ai_generate_summary(link_id: int):
+        """Generate a summary for a specific link."""
+        result = await engine.generate_summary(link_id)
+        
+        if result.get("error"):
+            raise HTTPException(400, result["error"])
+        
+        return result
+
+    @router.post("/summaries")
+    async def ai_generate_summaries_batch(body: SummaryBatchRequest, background_tasks: BackgroundTasks):
+        """
+        Generate summaries for links that need them.
+        
+        Uses prioritization to process most important links first.
+        """
+        if body.limit > 50:
+            raise HTTPException(400, "limit must be <= 50")
+
+        if body.limit <= 5:
+            result = await engine.generate_summaries_batch(limit=body.limit)
+            return result
+
+        async def _run():
+            await engine.generate_summaries_batch(limit=body.limit)
+
+        background_tasks.add_task(_run)
+        return {
+            "status": "started",
+            "message": f"Generating summaries for up to {body.limit} links in background",
+        }
+
+    # --------------------------------------------------------
     # Enrichment
     # --------------------------------------------------------
 
     @router.post("/enrich")
     async def ai_enrich_batch(body: EnrichRequest, background_tasks: BackgroundTasks):
         """
-        Enrich existing links that need descriptions, tags, or comments.
+        Enrich existing links that need descriptions, tags, comments, or summaries.
         
+        Uses prioritization to process most important links first.
         Runs in the background for batches > 3.
         """
         if body.limit > 50:
@@ -125,14 +178,103 @@ def create_ai_router(supabase_client, anthropic_api_key: str = None,
 
     @router.post("/enrich/{link_id}")
     async def ai_enrich_single(link_id: int, body: EnrichSingleRequest = None):
-        """Enrich a specific link with AI-generated content."""
+        """
+        Enrich a specific link with AI-generated content.
+        
+        Optionally specify which content types to generate and which personas to use.
+        """
         types = body.types if body else None
-        result = await engine.enrich_link(link_id, types=types)
+        personas = body.personas if body else None
+        result = await engine.enrich_link(link_id, types=types, personas=personas)
 
         if result.get("error"):
             raise HTTPException(400, result["error"])
 
         return result
+
+    # --------------------------------------------------------
+    # Personas
+    # --------------------------------------------------------
+
+    @router.get("/personas")
+    async def ai_personas():
+        """Get all configured AI personas with usage stats."""
+        return {"personas": await engine.get_personas()}
+
+    @router.get("/personas/{persona_id}")
+    async def ai_persona_detail(persona_id: str):
+        """Get details for a specific persona."""
+        personas = engine._get_personas()
+        persona = personas.get(persona_id)
+        
+        if not persona:
+            raise HTTPException(404, "Persona not found")
+        
+        # Get usage count
+        content_resp = supabase_client.table("ai_generated_content").select(
+            "id"
+        ).eq("persona_id", persona_id).execute()
+        
+        return {
+            "id": persona_id,
+            "author": persona.get("author"),
+            "model": persona.get("model"),
+            "description": persona.get("description"),
+            "priority": persona.get("priority"),
+            "has_system_prompt": bool(persona.get("system_prompt")),
+            "usage_count": len(content_resp.data or []),
+        }
+
+    @router.put("/personas/{persona_id}")
+    async def ai_persona_update(persona_id: str, body: PersonaUpdateRequest):
+        """Update a persona's configuration."""
+        update_data = {}
+        if body.name is not None:
+            update_data["name"] = body.name
+        if body.description is not None:
+            update_data["description"] = body.description
+        if body.system_prompt is not None:
+            update_data["system_prompt"] = body.system_prompt
+        if body.user_prompt_template is not None:
+            update_data["user_prompt_template"] = body.user_prompt_template
+        if body.model is not None:
+            update_data["model"] = body.model
+        if body.is_active is not None:
+            update_data["is_active"] = body.is_active
+        if body.priority is not None:
+            update_data["priority"] = body.priority
+
+        if not update_data:
+            raise HTTPException(400, "No fields to update")
+
+        try:
+            # Check if persona exists in DB
+            existing = supabase_client.table("ai_personas").select("id").eq("id", persona_id).execute()
+            
+            if existing.data:
+                supabase_client.table("ai_personas").update(update_data).eq("id", persona_id).execute()
+            else:
+                # Create new entry
+                update_data["id"] = persona_id
+                supabase_client.table("ai_personas").insert(update_data).execute()
+            
+            # Clear cache
+            engine._personas_cache = None
+            
+            return {"ok": True, "persona_id": persona_id}
+        except Exception as e:
+            raise HTTPException(500, str(e))
+
+    # --------------------------------------------------------
+    # Token Usage
+    # --------------------------------------------------------
+
+    @router.get("/token-usage")
+    async def ai_token_usage(days: int = 30):
+        """Get token usage statistics for the specified period."""
+        if days > 365:
+            days = 365
+        return await engine.get_token_usage_stats(days=days)
 
     # --------------------------------------------------------
     # Stats & Runs
@@ -162,9 +304,15 @@ def create_ai_router(supabase_client, anthropic_api_key: str = None,
             "*"
         ).eq("run_id", run_id).execute()
 
+        # Also get token usage for this run
+        token_resp = supabase_client.table("ai_token_usage").select(
+            "*"
+        ).eq("run_id", run_id).execute()
+
         return {
             "run": run_resp.data[0],
             "content": content_resp.data or [],
+            "token_usage": token_resp.data or [],
         }
 
     # --------------------------------------------------------

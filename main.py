@@ -1465,6 +1465,8 @@ async def process_single_feed(feed: dict):
                     'content': (item.get('content','') or '')[:10000],
                     'meta_json': item.get('meta', {}),
                     'content_vector': vector, 'feed_id': feed_id,
+                    'processing_status': 'new',
+                    'processing_priority': 1,  # Feed items = low priority
                 }).execute()
                 ingested += 1
             except Exception as e:

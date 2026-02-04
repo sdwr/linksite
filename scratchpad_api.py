@@ -288,6 +288,8 @@ def find_or_create_parent(url: str, link_id: int):
             "title": host,
             "source": "auto-parent",
             "description": f"Parent site: {host}",
+            "processing_status": "new",
+            "processing_priority": 1,  # Auto-parent stubs = low priority
         }).execute()
         parent_id = stub.data[0]["id"] if stub.data else None
 
@@ -769,6 +771,8 @@ def check_reverse_lookup(url: str, link_id: int):
                     "url": original_url,
                     "source": "reverse-lookup",
                     "submitted_by": "auto",
+                    "processing_status": "new",
+                    "processing_priority": 5,  # Reverse-lookup = moderate priority
                 }).execute()
                 if resp.data:
                     original_link_id = resp.data[0]["id"]
@@ -829,6 +833,8 @@ async def api_check_link(url: str = "", comments: int = 5):
             "url": url,
             "source": "agent",
             "submitted_by": "bot",
+            "processing_status": "new",
+            "processing_priority": 10,  # User/bot submitted = high priority
         }).execute()
         if not resp.data:
             raise HTTPException(status_code=500, detail="Failed to create link")
@@ -932,6 +938,8 @@ async def api_link_create(body: LinkCreate):
         "url": body.url,
         "source": "agent",
         "submitted_by": body.author,
+        "processing_status": "new",
+        "processing_priority": 10,  # User submitted = high priority
     }
     if body.title:
         insert_data["title"] = body.title

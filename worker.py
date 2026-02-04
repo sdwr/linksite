@@ -306,7 +306,7 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
         if not budget_ok:
             print(f"[Worker] Monthly budget exceeded (${monthly_spend:.2f}/${MONTHLY_BUDGET_USD}), skipping AI processing")
         
-        # 2. Get batch of links - first try 'new' links, then completed links needing work
+        # 2. Get batch of links with 'new' status only
         links = query(
             """
             SELECT id, url, title, description, content, summary, processing_status
@@ -317,29 +317,6 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
             """,
             (batch_size,)
         )
-        
-        if not links:
-            # No new links - look for completed links that might need more work
-            # (no summary and budget allows, or no external discussions checked)
-            links = query(
-                """
-                SELECT l.id, l.url, l.title, l.description, l.content, l.summary, l.processing_status
-                FROM links l
-                LEFT JOIN external_discussions ed ON ed.link_id = l.id
-                WHERE l.processing_status = 'completed'
-                  AND l.source NOT IN ('auto-parent', 'discussion-ref')
-                  AND (
-                    (l.summary IS NULL OR l.summary = '')
-                    OR ed.id IS NULL
-                  )
-                GROUP BY l.id
-                ORDER BY l.processing_priority DESC, l.created_at DESC
-                LIMIT %s
-                """,
-                (batch_size,)
-            )
-            if links:
-                print(f"[Worker] No new links, found {len(links)} completed links needing more work")
         
         if not links:
             print("[Worker] No links to process")

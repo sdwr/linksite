@@ -866,6 +866,81 @@ async def admin_worker_stop(admin: str = Depends(verify_admin)):
 
 
 # ============================================================
+# Admin: Manual Summary Generation (for Claude to call)
+# ============================================================
+
+@app.get("/api/admin/links-needing-summary")
+async def admin_links_needing_summary(
+    limit: int = 5,
+    admin: str = Depends(verify_admin)
+):
+    """Get links that have content but no summary (for manual summarization)."""
+    links = supabase.table("links").select(
+        "id, url, title, description, content"
+    ).is_("summary", "null").not_.is_("content", "null").neq(
+        "content", ""
+    ).not_.in_("source", ["auto-parent", "discussion-ref"]).order(
+        "created_at", desc=True
+    ).limit(limit).execute()
+    
+    return {
+        "count": len(links.data) if links.data else 0,
+        "links": links.data or []
+    }
+
+
+@app.patch("/api/admin/link/{link_id}/summary")
+async def admin_set_link_summary(
+    link_id: int,
+    summary: str,
+    admin: str = Depends(verify_admin)
+):
+    """Set the summary for a link (for manual summarization)."""
+    result = supabase.table("links").update({
+        "summary": summary
+    }).eq("id", link_id).execute()
+    
+    if result.data:
+        return {"status": "updated", "link_id": link_id}
+    else:
+        return {"status": "not_found", "link_id": link_id}
+
+
+@app.post("/api/admin/summaries/batch")
+async def admin_batch_summaries(
+    summaries: list,
+    admin: str = Depends(verify_admin)
+):
+    """Set summaries for multiple links at once.
+    
+    Expects: [{"id": 123, "summary": "..."}, ...]
+    """
+    updated = 0
+    errors = []
+    
+    for item in summaries:
+        link_id = item.get("id")
+        summary = item.get("summary")
+        
+        if not link_id or not summary:
+            errors.append(f"Invalid item: {item}")
+            continue
+        
+        try:
+            supabase.table("links").update({
+                "summary": summary
+            }).eq("id", link_id).execute()
+            updated += 1
+        except Exception as e:
+            errors.append(f"Link {link_id}: {str(e)}")
+    
+    return {
+        "updated": updated,
+        "errors": errors
+    }
+
+
+# ============================================================
 # Admin: RSS Gatherer Controls
 # ============================================================
 

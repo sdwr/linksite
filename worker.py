@@ -17,7 +17,10 @@ from typing import Optional
 from uuid import uuid4
 
 from db import query, query_one, execute
-from backoff import check_backoff, record_success, record_failure, get_backoff_status
+from backoff import (
+    check_backoff, record_success, record_failure, get_backoff_status,
+    check_rate_and_backoff, record_request, get_rate_limit_status
+)
 
 # ============================================================
 # Configuration
@@ -203,13 +206,13 @@ Just output the summary, no preamble."""
 async def run_external_discussion_lookup(link_id: int, url: str):
     """
     Run Reddit/HN reverse lookup for a link.
-    Uses existing functions from scratchpad_api but with backoff checking.
+    Uses existing functions from scratchpad_api but with backoff + rate limit checking.
     """
     from scratchpad_api import fetch_and_save_external_discussions, check_reverse_lookup
     
-    # Check backoff for reddit
-    if not check_backoff("reddit"):
-        print(f"[Worker] Skipping Reddit lookup for {link_id} - in backoff")
+    # Check both backoff AND rate limit for reddit
+    if not check_rate_and_backoff("reddit"):
+        print(f"[Worker] Skipping Reddit lookup for {link_id} - in backoff or rate limited")
         return
     
     try:
@@ -440,9 +443,13 @@ def get_worker_status() -> dict:
     # Budget status
     budget_remaining = max(0, MONTHLY_BUDGET_USD - monthly_spend)
     
-    # Backoff states
-    anthropic_status = get_backoff_status("anthropic")
-    reddit_status = get_backoff_status("reddit")
+    # Backoff states (exponential backoff from failures)
+    anthropic_backoff = get_backoff_status("anthropic")
+    reddit_backoff = get_backoff_status("reddit")
+    
+    # Rate limit states (rolling window usage)
+    anthropic_rate = get_rate_limit_status("anthropic")
+    reddit_rate = get_rate_limit_status("reddit")
     
     # Recent job runs
     recent_jobs = query(
@@ -463,8 +470,12 @@ def get_worker_status() -> dict:
         "budget_remaining_usd": round(budget_remaining, 4),
         "budget_ok": monthly_spend < MONTHLY_BUDGET_USD,
         "backoff_states": {
-            "anthropic": anthropic_status,
-            "reddit": reddit_status,
+            "anthropic": anthropic_backoff,
+            "reddit": reddit_backoff,
+        },
+        "rate_limit_states": {
+            "anthropic": anthropic_rate,
+            "reddit": reddit_rate,
         },
         "recent_jobs": recent_jobs,
     }

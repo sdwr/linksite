@@ -917,16 +917,34 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         if not link.get('tags'):
             tags_html = '<div class="tags-row"><span style="color:#475569;font-size:13px">No tags yet</span></div>'
 
-        # Summary section (if available)
+        # Get processing status early for use in template
+        processing_status = link.get('processing_status', 'new')
+        has_summary = bool(link.get('summary') and len(link.get('summary', '')) > 20)
+
+        # Summary section (if available) - include ID for live-loading updates
         summary_html = ""
-        if link.get('summary') and len(link.get('summary', '')) > 20:
-            summary_html = f'''<div style="margin-top:16px;padding:14px 18px;background:linear-gradient(135deg,#1e1b4b,#312e81);border:1px solid #4338ca;border-radius:10px">
+        if has_summary:
+            summary_html = f'''<div id="summary-section" style="margin-top:16px;padding:14px 18px;background:linear-gradient(135deg,#1e1b4b,#312e81);border:1px solid #4338ca;border-radius:10px">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                     <span style="font-size:16px">&#129302;</span>
                     <span style="font-weight:600;color:#a5b4fc;font-size:13px">AI Summary</span>
                 </div>
                 <p style="color:#e2e8f0;font-size:14px;line-height:1.6;margin:0">{_esc(link.get('summary', ''))}</p>
             </div>'''
+        else:
+            # Placeholder for summary (hidden, will show when populated by live-loading)
+            summary_html = '''<div id="summary-section" style="display:none;margin-top:16px;padding:14px 18px;background:linear-gradient(135deg,#1e1b4b,#312e81);border:1px solid #4338ca;border-radius:10px"></div>'''
+        
+        # Processing indicator (shown when link is new/processing)
+        processing_indicator = ""
+        if processing_status in ('new', 'processing'):
+            processing_indicator = '''<div id="processing-indicator" style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#1e293b;border:1px solid #334155;border-radius:8px;margin-bottom:12px">
+                <div style="width:16px;height:16px;border:2px solid #334155;border-top-color:#60a5fa;border-radius:50%;animation:lazysp 0.7s linear infinite"></div>
+                <span style="color:#94a3b8;font-size:13px">Processing link... checking for discussions and generating summary</span>
+            </div>'''
+        else:
+            # Hidden placeholder for consistency
+            processing_indicator = '''<div id="processing-indicator" style="display:none"></div>'''
 
         # Parent link
         parent_html = ""
@@ -964,6 +982,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         </div>'''
 
         body = f"""{msgs}
+        {processing_indicator}
         <div class="card" style="position:relative">
             <div style="position:absolute;top:24px;right:24px">
                 <form method="POST" action="/link/{link_id}/star" style="margin:0">
@@ -974,7 +993,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                 </form>
             </div>
             {parent_html}
-            <h1 style="margin-bottom:4px;padding-right:80px"><a href="{_esc(url)}" target="_blank" style="color:#f1f5f9;text-decoration:none">{title}</a></h1>
+            <h1 id="link-title" style="margin-bottom:4px;padding-right:80px"><a href="{_esc(url)}" target="_blank" style="color:#f1f5f9;text-decoration:none">{title}</a></h1>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
                 <div style="color:#64748b;font-size:13px">
                     <a href="/browse?q={_esc(domain)}" style="color:#64748b">{_esc(domain)}</a>
@@ -1004,6 +1023,8 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             "<script>\n"
             + _JS_HELPERS
             + "\nvar LID=" + str(link_id) + ";\n"
+            + "var PROCESSING_STATUS=" + _json.dumps(processing_status) + ";\n"
+            + "var HAS_SUMMARY=" + _json.dumps(has_summary) + ";\n"
             + r"""
 // --- Load notes/comments ---
 fetch('/api/link/'+LID+'/notes').then(function(r){return r.json();}).then(function(data){
@@ -1098,6 +1119,113 @@ function _toggleDisc(){
         extras.forEach(function(e){e.style.display='';});
         btn.textContent='Show less';
     }
+}
+
+// ============================================================
+// Live-Loading: Poll for updates when link is processing
+// ============================================================
+var _pollInterval = null;
+var _lastDiscCount = 0;
+
+function _renderDiscussions(disc){
+    var c=document.getElementById('discussions-container');
+    if(!disc||!disc.length){
+        c.innerHTML='<p style="color:#475569;font-size:13px;padding:4px 0">No external discussions found yet. Click refresh to check HN and Reddit.</p>';
+        return;
+    }
+    var hnReddit=disc.filter(function(d){return d.platform==='hackernews'||d.platform==='reddit';});
+    var bsky=disc.filter(function(d){return d.platform==='bluesky';});
+    hnReddit.sort(function(a,b){return((b.score||0)+(b.num_comments||0))-((a.score||0)+(a.num_comments||0));});
+    var h='';var LIM=3;
+    hnReddit.forEach(function(d,i){
+        var hide=i>=LIM?' style="display:none"':'';
+        var cls=i>=LIM?' ext-disc-extra':'';
+        var icon=d.platform==='reddit'?'&#129302;':'&#129412;';
+        var iconColor=d.platform==='reddit'?'#ff4500':'#ff6600';
+        var meta=d.platform==='reddit'?'r/'+_esc(d.subreddit||'reddit'):'Hacker News';
+        var discUrl=d.internal_link_id?'/link/'+d.internal_link_id:_esc(d.external_url||'#');
+        var discTarget=d.internal_link_id?'':'target="_blank"';
+        var discTitle=d.title||'Discussion';if(discTitle.length>80)discTitle=discTitle.substring(0,77)+'...';
+        h+='<a href="'+discUrl+'" '+discTarget+' class="ext-disc'+cls+'"'+hide+' style="text-decoration:none">'+
+            '<div class="platform-icon" style="color:'+iconColor+'">'+icon+'</div>'+
+            '<div class="disc-info"><div class="disc-title">'+_esc(discTitle)+'</div>'+
+            '<div class="disc-meta">'+meta+'</div></div>'+
+            '<div class="disc-stats"><span>&#9650; '+(d.score||0)+'</span><span>&#128172; '+(d.num_comments||0)+'</span></div></a>';
+    });
+    if(hnReddit.length>LIM){
+        var ex=hnReddit.length-LIM;
+        h+='<button id="disc-toggle" onclick="_toggleDisc()" style="background:none;border:1px solid #334155;color:#94a3b8;padding:8px 16px;border-radius:8px;cursor:pointer;width:100%;font-size:13px;margin-top:4px">Show '+ex+' more discussion'+(ex!==1?'s':'')+'</button>';
+    }
+    if(bsky.length>0){h+='<div style="margin-bottom:8px;margin-top:'+(hnReddit.length>0?'16':'0')+'px"><span style="color:#0085ff;font-weight:600;font-size:14px">&#129419; Bluesky</span></div>';}
+    bsky.forEach(function(d){
+        h+='<a href="'+_esc(d.external_url||'#')+'" target="_blank" class="ext-disc" style="text-decoration:none">'+
+            '<div class="platform-icon">&#129419;</div>'+
+            '<div class="disc-info"><div class="disc-title">'+_esc(d.title||'Discussion')+'</div>'+
+            '<div class="disc-meta">Bluesky</div></div>'+
+            '<div class="disc-stats"><span>&#9650; '+(d.score||0)+'</span><span>&#128172; '+(d.num_comments||0)+'</span></div></a>';
+    });
+    c.innerHTML=h;
+}
+
+function _pollStatus(){
+    fetch('/api/link/'+LID+'/status').then(function(r){return r.json();}).then(function(data){
+        var status = data.processing_status||'new';
+        
+        // Update summary if now available and wasn't before
+        if(data.has_summary && !HAS_SUMMARY){
+            var sumEl=document.getElementById('summary-section');
+            if(sumEl){
+                sumEl.style.display='block';
+                sumEl.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'+
+                    '<span style="font-size:16px">&#129302;</span>'+
+                    '<span style="font-weight:600;color:#a5b4fc;font-size:13px">AI Summary</span>'+
+                '</div><p style="color:#e2e8f0;font-size:14px;line-height:1.6;margin:0">'+_esc(data.summary||'')+'</p>';
+                sumEl.style.animation='fadeIn 0.3s ease';
+            }
+            HAS_SUMMARY=true;
+        }
+        
+        // Update title if we got one
+        if(data.has_title && data.title){
+            var titleEl=document.getElementById('link-title');
+            if(titleEl && titleEl.textContent!==data.title){
+                titleEl.textContent=data.title;
+            }
+        }
+        
+        // Update discussions if we have new ones
+        var discCount=(data.discussions||[]).length;
+        if(discCount>_lastDiscCount){
+            _renderDiscussions(data.discussions);
+            _lastDiscCount=discCount;
+        }
+        
+        // Update processing indicator
+        var procEl=document.getElementById('processing-indicator');
+        if(procEl){
+            if(status==='completed'||status==='failed'){
+                procEl.style.display='none';
+            }else{
+                procEl.style.display='';
+            }
+        }
+        
+        // Stop polling when done
+        if(status==='completed'||status==='failed'){
+            if(_pollInterval){clearInterval(_pollInterval);_pollInterval=null;}
+            console.log('[LiveLoad] Processing complete, stopped polling');
+        }
+    }).catch(function(e){
+        console.error('[LiveLoad] Poll error:',e);
+    });
+}
+
+// Start polling if link is still processing
+if(PROCESSING_STATUS==='new'||PROCESSING_STATUS==='processing'){
+    console.log('[LiveLoad] Link is '+PROCESSING_STATUS+', starting status polling');
+    _pollInterval=setInterval(_pollStatus, 5000);
+    // Also poll immediately after a short delay
+    setTimeout(_pollStatus, 2000);
 }
 """
             + "</script>"

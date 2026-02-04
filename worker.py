@@ -489,18 +489,24 @@ def get_worker_status() -> dict:
 
 _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
+_batch_lock = asyncio.Lock()
 
 
-async def _worker_loop(interval_seconds: int = 90):
+async def _worker_loop(interval_seconds: int = 180):
     """Background loop that runs processing batches periodically."""
     global _worker_running
     print(f"[Worker] Background loop started (interval: {interval_seconds}s)")
     
     while _worker_running:
-        try:
-            await run_processing_batch(batch_size=20)
-        except Exception as e:
-            print(f"[Worker] Background batch error: {e}")
+        # Only run if not already processing a batch
+        if _batch_lock.locked():
+            print("[Worker] Batch already running, skipping this cycle")
+        else:
+            async with _batch_lock:
+                try:
+                    await run_processing_batch(batch_size=10)
+                except Exception as e:
+                    print(f"[Worker] Background batch error: {e}")
         
         # Wait for next interval
         await asyncio.sleep(interval_seconds)
@@ -508,7 +514,7 @@ async def _worker_loop(interval_seconds: int = 90):
     print("[Worker] Background loop stopped")
 
 
-def start_background_worker(interval_seconds: int = 90):
+def start_background_worker(interval_seconds: int = 180):
     """Start the background worker task."""
     global _worker_task, _worker_running
     

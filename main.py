@@ -832,17 +832,20 @@ async def admin_worker_status(admin: str = Depends(verify_admin)):
 
 @app.post("/api/admin/worker/run")
 async def admin_worker_run(
-    background_tasks: BackgroundTasks,
-    batch_size: int = 20,
+    batch_size: int = 10,
     admin: str = Depends(verify_admin)
 ):
-    """Manually trigger a processing batch."""
-    async def do_batch():
+    """Manually trigger a processing batch (waits for completion, respects lock)."""
+    from worker import _batch_lock
+    
+    if _batch_lock.locked():
+        return {"status": "busy", "message": "A batch is already running, please wait"}
+    
+    async with _batch_lock:
         result = await run_processing_batch(batch_size=batch_size)
         print(f"[Admin] Worker batch complete: {result}")
-
-    background_tasks.add_task(do_batch)
-    return {"status": "started", "batch_size": batch_size, "message": "Processing batch started in background"}
+    
+    return {"status": "completed", "batch_size": batch_size, "result": result}
 
 
 @app.post("/api/admin/worker/start")
@@ -2465,9 +2468,9 @@ async def api_admin_ai_discover_reddit(background_tasks: BackgroundTasks, admin:
         return {"status": "error", "error": str(e)}
 
 
-@app.post("/api/admin/worker/run")
-async def api_admin_worker_run(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
-    """Manually trigger AI processing worker batch."""
+@app.post("/api/admin/ai/enrich")
+async def api_admin_ai_enrich(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger AI enrichment batch (summaries, descriptions, comments via AI engine)."""
     try:
         engine = _get_ai_engine()
         
@@ -2475,7 +2478,7 @@ async def api_admin_worker_run(background_tasks: BackgroundTasks, admin: str = D
             return await engine.enrich_batch(limit=5, types=["summary", "description", "comments"])
         
         background_tasks.add_task(_run)
-        return {"status": "started", "message": "Processing batch started in background"}
+        return {"status": "started", "message": "AI enrichment batch started in background"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

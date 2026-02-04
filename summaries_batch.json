@@ -1,10 +1,42 @@
 [
   {
-    "id": 241,
-    "summary": "A developer's journey switching from Windows to Linux after years of frustration with Windows 24H2 bugs, forced updates, and intrusive ads. The author installed CachyOS (Arch-based) and found that while Linux requires effort, it's now comparable to the effort needed to fight Windows. Covers browser support (excellent), development (native and superior), content creation (viable with compromises), music production (Bitwig as Ableton alternative with lower latency than Windows), and gaming (mostly working via Proton, with AMD performing on par with Windows)."
+    "id": 237,
+    "summary": "CN Diagrams removes the C4 model's four-level ceiling, letting architecture diagrams scale to arbitrary depth. The tool syncs bidirectionally between a YAML DSL (for engineers to version control) and a visual editor (for product managers to drag boxes). Force-directed graph rendering via Cytoscape.js reinforces the mental model: dependencies cluster naturally, and changes stay local to their edges."
   },
   {
-    "id": 239,
-    "summary": "WhatsApp rebuilt their media consistency library from 160,000 lines of C++ to 90,000 lines of Rust, creating what they claim is the largest Rust deployment to end users globally. The library validates media files to detect malformed content that could exploit vulnerabilities in OS-level parsers. Rust's memory safety eliminates an entire class of security bugs, and the rewrite showed performance improvements over the original C++. Now deployed to billions of devices across Android, iOS, Mac, Web, and wearables."
+    "id": 235,
+    "summary": "Cuttlefish achieves 286ns admission latency and 3.5M ops/sec by exploiting a simple algebraic insight: if your operations commute, you don't need coordination. The Rust kernel enforces invariants at L1 cache speed using Bloom filter vector clocks for causal ordering. For comparison, etcd pays 1-10ms and CockroachDB 1-50ms for linearizable writes. The trade-off is explicit—this is a kernel, not a database."
+  },
+  {
+    "id": 234,
+    "summary": "C++20 modules finally eliminate the #include preprocessor directive, providing 8.6x compile speedup over stock Clang in competitive programming benchmarks. The key: precompiled module interfaces (PCMs) that don't need re-parsing. CMake 3.28+ supports modules natively, though import std; remains experimental. The mental shift is real—after 40+ years, C++ programs can build without touching the preprocessor."
+  },
+  {
+    "id": 233,
+    "summary": "A pure C implementation of the Discrete Cosine Transform, the mathematical heart of JPEG compression. The code splits images into 8×8 blocks, transforms to frequency domain, optionally zeros high-frequency coefficients, then reconstructs. Educational intent is explicit: no abstractions, maximum transparency—watch visually how discarding frequencies affects the image."
+  },
+  {
+    "id": 230,
+    "summary": "Drew DeVault argues that TDD and coding agents exploit the same psychological reflex: both let mediocre programmers feel like great ones. TDD provides dopamine via green lights and coverage numbers; agents provide the rush of 10× output. Neither solves the hard problems. The cathedrals agents build are shoddy underneath—and the users know about the externalities but chase the dragon anyway."
+  },
+  {
+    "id": 229,
+    "summary": "Research backs what developers feel: the cognitive ceiling for deep work is 3-4 hours daily. An analysis of 250,000 developers found median coding time of just 52 minutes per day, with meetings consuming 11+ hours weekly. Gloria Mark's research shows 23 minutes to recover from one interruption—for programmers, 30-45 minutes to fully rebuild mental context. Flow states yield 500% productivity gains, but require 15-25 minutes just to begin."
+  },
+  {
+    "id": 226,
+    "summary": "The teammate who asks 'obvious' questions is catching blind spots before they become costly mistakes. One payment system upgrade proceeded on the assumption that the new system had to work exactly like the old one—an assumption no one questioned. Months later, the team discovered the constraint never existed. One question at the start would have saved the entire effort."
+  },
+  {
+    "id": 195,
+    "summary": "Britain's National Pigeon Service contributed 200,000 birds to WWII, 16,554 of which were parachuted onto the continent. In 1982, a skeleton with a coded D-Day message was found in a Surrey chimney—27 five-letter groups addressed to 'XO2' and signed 'W Stot Sjt.' GCHQ has asked for public help; without the original codebooks, they say decryption is impossible and any proposed solution unprovable."
+  },
+  {
+    "id": 176,
+    "summary": "Paul Graham identifies two sources of superlinear returns: exponential growth (where doing well enables doing better) and thresholds (winner-take-all dynamics). Learning uniquely combines both—knowledge compounds exponentially, and pushing at boundaries sometimes reveals entire new fields. The practical heuristic: always be learning, but don't overoptimize what you learn. You don't know yet what will be valuable."
+  },
+  {
+    "id": 171,
+    "summary": "A Director of Operations insisted on bypassing the domestic importer to save 15% on holiday decor by going direct to China. He wired money without hiring a customs broker, didn't file the ISF, and left a container sitting at port for 10 days accruing demurrage fees. Total cost: roughly double what the 'savings' would have been. He asked for the old importer's number yesterday."
   }
 ]

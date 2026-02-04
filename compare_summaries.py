@@ -8,11 +8,15 @@ import asyncio
 import httpx
 from datetime import datetime
 
-# Direct DB connection
-import psycopg2
-from psycopg2.extras import RealDictCursor
+# Load .env
+from dotenv import load_dotenv
+load_dotenv()
 
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres.rsjcdwmgbxthsuyspndt:0JvN0xPnOFcxPbmm@aws-0-us-east-1.pooler.supabase.com:5432/postgres')
+# Use Supabase client like the rest of the app
+from supabase import create_client
+
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
@@ -64,19 +68,17 @@ async def call_sonnet(prompt: str, http: httpx.AsyncClient) -> dict:
 
 
 async def main():
-    # Connect to DB
-    conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    # Connect via Supabase client
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
     
     # Fetch 10 links with existing summaries
-    cur.execute("""
-        SELECT id, url, title, description, content, summary
-        FROM links
-        WHERE summary IS NOT NULL AND summary != ''
-        ORDER BY created_at DESC
-        LIMIT 10
-    """)
-    links = cur.fetchall()
+    resp = sb.table("links").select(
+        "id, url, title, description, content, summary"
+    ).not_.is_("summary", "null").neq("summary", "").order(
+        "created_at", desc=True
+    ).limit(10).execute()
+    
+    links = resp.data
     
     if not links:
         print("No links with summaries found!")
@@ -120,9 +122,6 @@ async def main():
         cost = (total_input * 3.0 + total_output * 15.0) / 1_000_000
         print(f"\nSONNET TOTALS: {total_input} input + {total_output} output tokens")
         print(f"ESTIMATED COST: ${cost:.4f}")
-    
-    cur.close()
-    conn.close()
 
 
 if __name__ == "__main__":

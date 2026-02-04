@@ -489,20 +489,29 @@ def get_worker_status() -> dict:
 
 _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
-_batch_lock = asyncio.Lock()
+_batch_lock: Optional[asyncio.Lock] = None
+
+
+def _get_batch_lock() -> asyncio.Lock:
+    """Get or create the batch lock (lazy init for asyncio compatibility)."""
+    global _batch_lock
+    if _batch_lock is None:
+        _batch_lock = asyncio.Lock()
+    return _batch_lock
 
 
 async def _worker_loop(interval_seconds: int = 180):
     """Background loop that runs processing batches periodically."""
     global _worker_running
+    lock = _get_batch_lock()
     print(f"[Worker] Background loop started (interval: {interval_seconds}s)")
     
     while _worker_running:
         # Only run if not already processing a batch
-        if _batch_lock.locked():
+        if lock.locked():
             print("[Worker] Batch already running, skipping this cycle")
         else:
-            async with _batch_lock:
+            async with lock:
                 try:
                     await run_processing_batch(batch_size=10)
                 except Exception as e:

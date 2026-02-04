@@ -836,12 +836,13 @@ async def admin_worker_run(
     admin: str = Depends(verify_admin)
 ):
     """Manually trigger a processing batch (waits for completion, respects lock)."""
-    from worker import _batch_lock
+    from worker import _get_batch_lock
+    lock = _get_batch_lock()
     
-    if _batch_lock.locked():
+    if lock.locked():
         return {"status": "busy", "message": "A batch is already running, please wait"}
     
-    async with _batch_lock:
+    async with lock:
         result = await run_processing_batch(batch_size=batch_size)
         print(f"[Admin] Worker batch complete: {result}")
     

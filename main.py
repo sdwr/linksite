@@ -875,17 +875,24 @@ async def admin_links_needing_summary(
     admin: str = Depends(verify_admin)
 ):
     """Get links that have content but no summary (for manual summarization)."""
-    links = supabase.table("links").select(
-        "id, url, title, description, content"
-    ).is_("summary", "null").not_.is_("content", "null").neq(
-        "content", ""
-    ).not_.in_("source", ["auto-parent", "discussion-ref"]).order(
-        "created_at", desc=True
-    ).limit(limit).execute()
+    from db import query
+    
+    links = query(
+        """
+        SELECT id, url, title, description, content
+        FROM links
+        WHERE (summary IS NULL OR summary = '')
+          AND content IS NOT NULL AND content != ''
+          AND source NOT IN ('auto-parent', 'discussion-ref')
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (limit,)
+    )
     
     return {
-        "count": len(links.data) if links.data else 0,
-        "links": links.data or []
+        "count": len(links) if links else 0,
+        "links": links or []
     }
 
 

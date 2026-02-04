@@ -563,19 +563,15 @@ def reset_orphaned_processing_links():
     Called on worker startup.
     """
     try:
-        result = execute(
-            """
-            UPDATE links 
-            SET processing_status = 'new'
-            WHERE processing_status = 'processing'
-            RETURNING id
-            """
-        )
-        # execute doesn't return rows, so let's query separately
+        # First count how many are stuck
         stuck = query("SELECT COUNT(*) as cnt FROM links WHERE processing_status = 'processing'")
-        if stuck and stuck[0]['cnt'] > 0:
+        count = stuck[0]['cnt'] if stuck else 0
+        
+        if count > 0:
             execute("UPDATE links SET processing_status = 'new' WHERE processing_status = 'processing'")
-            print(f"[Worker] Reset {stuck[0]['cnt']} orphaned 'processing' links back to 'new'")
+            print(f"[Worker] Reset {count} orphaned 'processing' links back to 'new'")
+        else:
+            print("[Worker] No orphaned 'processing' links to reset")
     except Exception as e:
         print(f"[Worker] Error resetting orphaned links: {e}")
 

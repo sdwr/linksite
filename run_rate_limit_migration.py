@@ -1,28 +1,36 @@
-"""Run the rate limit migration on the database."""
-import os
-import psycopg2
-from dotenv import load_dotenv
+"""Run the rate limit migration on the database using existing db module."""
+from db import execute, query
 
-load_dotenv()
-conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-conn.autocommit = True
-cur = conn.cursor()
+# Add columns (use raw SQL since we can't do ALTER via PostgREST)
+# Instead, let's just ensure the API entries exist and check column status
 
-# Run migration
-with open('migrate_rate_limits.sql', 'r') as f:
-    sql = f.read()
+# Test if columns exist by trying to select them
+try:
+    result = query("SELECT api_name, requests_this_window, window_start FROM api_rate_limits LIMIT 1")
+    print(f"Columns already exist! Current data: {result}")
+except Exception as e:
+    print(f"Columns may not exist yet: {e}")
+    print("Run the migrate_rate_limits.sql in Supabase SQL Editor manually")
+    exit(1)
 
-# Split by semicolons and execute each statement
-for stmt in sql.split(';'):
-    stmt = stmt.strip()
-    if stmt and not stmt.startswith('--'):
-        print(f'Executing: {stmt[:60]}...')
-        try:
-            cur.execute(stmt)
-            print('  OK')
-        except Exception as e:
-            print(f'  Error: {e}')
+# Ensure API entries exist (upsert)
+apis = ['reddit', 'anthropic', 'hackernews']
+for api in apis:
+    try:
+        execute(
+            """
+            INSERT INTO api_rate_limits (api_name, requests_this_window, window_start)
+            VALUES (%s, 0, now())
+            ON CONFLICT (api_name) DO UPDATE SET
+                requests_this_window = COALESCE(api_rate_limits.requests_this_window, 0)
+            """,
+            (api,)
+        )
+        print(f"Ensured {api} entry exists")
+    except Exception as e:
+        print(f"Error with {api}: {e}")
 
-cur.close()
-conn.close()
-print('Migration complete!')
+# Verify
+result = query("SELECT api_name, requests_this_window, window_start FROM api_rate_limits")
+print(f"Current api_rate_limits: {result}")
+print("Migration check complete!")

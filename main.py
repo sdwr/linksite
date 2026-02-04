@@ -2130,13 +2130,76 @@ async def admin_ai_dashboard(message: str = None, error: str = None, admin: str 
             </div>
         </div>"""
 
+        # --- AI Personas Section ---
+        try:
+            personas = await engine.get_personas()
+            persona_rows = ""
+            for p in personas:
+                pid = _esc(p.get("id", "?"))
+                pauthor = _esc(p.get("author", "?"))
+                pmodel = _esc(p.get("model", "haiku"))
+                pdesc = _esc(p.get("description", "")[:60])
+                ppriority = p.get("priority", 50)
+                pusage = p.get("usage_count", 0)
+                has_custom = "&#10003;" if p.get("has_custom_prompt") else "-"
+                
+                model_color = "#7c3aed" if pmodel == "sonnet" else "#2563eb"
+                
+                persona_rows += f"""<tr>
+                    <td><strong style="font-size:14px">{pid}</strong></td>
+                    <td style="color:#64748b;font-size:13px">{pauthor}</td>
+                    <td><span style="background:#f0f9ff;color:{model_color};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">{pmodel}</span></td>
+                    <td style="font-size:13px;max-width:200px;color:#64748b">{pdesc if pdesc else '-'}</td>
+                    <td style="text-align:center">{ppriority}</td>
+                    <td style="text-align:center;font-weight:600">{pusage}</td>
+                    <td style="text-align:center;color:#64748b">{has_custom}</td>
+                </tr>"""
+            
+            if not persona_rows:
+                persona_rows = '<tr><td colspan="7" style="color:#94a3b8;text-align:center;padding:24px">No personas configured</td></tr>'
+            
+            personas_html = f"""<div class="card">
+                <h2>&#129302; AI Personas</h2>
+                <p style="font-size:13px;color:#64748b;margin-bottom:12px">AI personas generate diverse comments from different perspectives.</p>
+                <div style="overflow-x:auto">
+                <table>
+                <thead><tr>
+                    <th>ID</th>
+                    <th>Author</th>
+                    <th>Model</th>
+                    <th>Description</th>
+                    <th style="text-align:center">Priority</th>
+                    <th style="text-align:center">Usage</th>
+                    <th style="text-align:center">Custom</th>
+                </tr></thead>
+                <tbody>{persona_rows}</tbody>
+                </table>
+                </div>
+            </div>"""
+        except Exception as e:
+            personas_html = f'<div class="card"><h2>&#129302; AI Personas</h2><div class="msg-err">Error loading personas: {_esc(str(e))}</div></div>'
+
+        # --- Generate Comment for Specific Link ---
+        gen_comment_html = """<div class="card">
+            <h2>&#128172; Generate Comment</h2>
+            <p style="font-size:13px;color:#64748b;margin-bottom:12px">Manually generate AI comments for a specific link.</p>
+            <form method="POST" action="/admin/ai/generate-comment" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+                <div style="flex:1;min-width:150px">
+                    <label style="font-size:12px;color:#64748b;display:block;margin-bottom:2px">Link ID</label>
+                    <input type="number" name="link_id" placeholder="123" required style="width:100%">
+                </div>
+                <button class="btn btn-primary" type="submit">&#128172; Generate Comment</button>
+            </form>
+        </div>"""
+
         # --- Assemble ---
         body = _messages(message, error)
         body += health_html
         body += '<div class="grid-2">'
         body += token_html
-        body += '<div>' + discover_html + enrich_html + '</div>'
+        body += '<div>' + discover_html + enrich_html + gen_comment_html + '</div>'
         body += '</div>'
+        body += personas_html
         body += runs_html
         body += content_html
 
@@ -2209,6 +2272,40 @@ async def admin_ai_enrich(background_tasks: BackgroundTasks,
         return RedirectResponse(
             url=f"/admin/ai?message=Enrichment started in background ({limit} links)",
             status_code=303)
+
+
+@app.post("/admin/ai/generate-comment")
+async def admin_ai_generate_comment_form(
+    background_tasks: BackgroundTasks,
+    link_id: int = Form(...),
+    admin: str = Depends(verify_admin)
+):
+    """HTML form handler to generate AI comment for a specific link."""
+    try:
+        engine = _get_ai_engine()
+        result = await engine.enrich_link(link_id, types=["comments"])
+        
+        comments = result.get("generated", {}).get("comments", [])
+        if comments:
+            return RedirectResponse(
+                url=f"/admin/ai?message=Generated {len(comments)} comment(s) for link {link_id}",
+                status_code=303
+            )
+        elif result.get("error"):
+            return RedirectResponse(
+                url=f"/admin/ai?error=Error: {result['error']}",
+                status_code=303
+            )
+        else:
+            return RedirectResponse(
+                url=f"/admin/ai?message=No new comments generated (may already exist)",
+                status_code=303
+            )
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/admin/ai?error=Error: {str(e)}",
+            status_code=303
+        )
 
 
 # ============================================================

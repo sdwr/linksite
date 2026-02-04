@@ -2435,9 +2435,9 @@ async def api_admin_job_runs(limit: int = 20, admin: str = Depends(verify_admin)
         return {"error": str(e)}
 
 
-@app.post("/api/admin/gather/hn")
-async def api_admin_gather_hn(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
-    """Manually trigger Hacker News link gathering."""
+@app.post("/api/admin/ai-discover/hn")
+async def api_admin_ai_discover_hn(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger AI-based Hacker News link discovery (web search, not RSS)."""
     try:
         engine = _get_ai_engine()
         
@@ -2445,14 +2445,14 @@ async def api_admin_gather_hn(background_tasks: BackgroundTasks, admin: str = De
             return await engine.discover_links(source="hn", count=10)
         
         background_tasks.add_task(_run)
-        return {"status": "started", "message": "HN gathering started in background"}
+        return {"status": "started", "message": "AI HN discovery started in background"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
-@app.post("/api/admin/gather/reddit")
-async def api_admin_gather_reddit(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
-    """Manually trigger Reddit link gathering."""
+@app.post("/api/admin/ai-discover/reddit")
+async def api_admin_ai_discover_reddit(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger AI-based Reddit link discovery (web search, not RSS)."""
     try:
         engine = _get_ai_engine()
         
@@ -2460,7 +2460,7 @@ async def api_admin_gather_reddit(background_tasks: BackgroundTasks, admin: str 
             return await engine.discover_links(source="reddit", count=10)
         
         background_tasks.add_task(_run)
-        return {"status": "started", "message": "Reddit gathering started in background"}
+        return {"status": "started", "message": "AI Reddit discovery started in background"}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

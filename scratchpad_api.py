@@ -130,7 +130,15 @@ def _get_reddit_token():
 
 def _reddit_api_get(path, params=None):
     """Make an authenticated GET to Reddit OAuth API with rate limiting."""
-    # Rate limit: wait if last call was too recent
+    from backoff import check_rate_limit, record_request
+    
+    # Check database-backed rate limit first
+    if not check_rate_limit("reddit"):
+        _reddit_stats["last_error"] = "Rate limited (window quota exceeded)"
+        _reddit_stats["last_error_time"] = _time.time()
+        return None
+    
+    # Also enforce minimum interval between calls
     now = _time.time()
     elapsed = now - _reddit_stats["last_call_time"]
     if elapsed < _REDDIT_MIN_INTERVAL:
@@ -143,6 +151,9 @@ def _reddit_api_get(path, params=None):
     ua = _get_reddit_user_agent()
 
     try:
+        # Record the request BEFORE making it (count against rate limit)
+        record_request("reddit")
+        
         resp = httpx.get(
             f"https://oauth.reddit.com{path}",
             params=params,
@@ -1049,6 +1060,53 @@ async def api_find_discussions(link_id: int):
 async def api_get_discussions(link_id: int):
     """Get external discussions for a link."""
     return {"discussions": get_external_discussions(link_id)}
+
+
+@router.get("/api/link/{link_id}/status")
+async def api_link_status(link_id: int):
+    """
+    Get processing status for a link - for live-loading UI polling.
+    
+    Returns:
+    {
+        processing_status: 'new' | 'processing' | 'completed' | 'failed',
+        summary: string | null,
+        discussions: array,
+        has_summary: boolean,
+        has_discussions: boolean,
+        title: string | null,
+        og_image_url: string | null
+    }
+    """
+    link_resp = supabase.table("links").select(
+        "id, url, title, summary, og_image_url, processing_status"
+    ).eq("id", link_id).execute()
+    
+    if not link_resp.data:
+        raise HTTPException(status_code=404, detail="Link not found")
+    
+    link = link_resp.data[0]
+    
+    # Get discussions
+    discussions = get_external_discussions(link_id)
+    
+    # Determine if we have meaningful content
+    has_summary = bool(link.get("summary") and len(link.get("summary", "")) > 20)
+    has_discussions = len(discussions) > 0
+    has_title = bool(link.get("title") and len(link.get("title", "")) > 0)
+    has_image = bool(link.get("og_image_url"))
+    
+    return {
+        "processing_status": link.get("processing_status", "new"),
+        "summary": link.get("summary"),
+        "discussions": discussions,
+        "has_summary": has_summary,
+        "has_discussions": has_discussions,
+        "has_title": has_title,
+        "has_image": has_image,
+        "title": link.get("title"),
+        "og_image_url": link.get("og_image_url"),
+    }
 
 
 @router.get("/api/reddit-status")

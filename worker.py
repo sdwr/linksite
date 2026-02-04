@@ -12,6 +12,7 @@ Budget constraint: $50/month max for Anthropic API
 import os
 import asyncio
 import httpx
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import uuid4
@@ -252,10 +253,10 @@ def _log_job_complete(job_id: str, items_processed: int, error: str = None):
     execute(
         """
         UPDATE job_runs 
-        SET status = %s, completed_at = now(), items_processed = %s, error_message = %s
+        SET status = %s, completed_at = now(), items_processed = %s, errors = %s::jsonb
         WHERE id = %s
         """,
-        (status, items_processed, error[:500] if error else None, job_id)
+        (status, items_processed, json.dumps([error[:500]]) if error else '[]', job_id)
     )
 
 
@@ -454,7 +455,7 @@ def get_worker_status() -> dict:
     # Recent job runs
     recent_jobs = query(
         """
-        SELECT job_type, status, started_at, completed_at, items_processed, error_message
+        SELECT job_type, status, started_at, completed_at, items_processed, errors
         FROM job_runs
         WHERE job_type = 'process_batch'
         ORDER BY started_at DESC

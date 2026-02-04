@@ -1182,7 +1182,7 @@ async def api_links_browse(
 ):
     """Browse/search links."""
     query = supabase.table("links").select(
-        "id, url, title, description, og_image_url, screenshot_url, source, submitted_by, direct_score, created_at, parent_link_id",
+        "id, url, title, description, og_image_url, screenshot_url, source, submitted_by, direct_score, created_at, parent_link_id, summary",
         count="exact"
     )
 

@@ -1,0 +1,933 @@
+[
+  {
+    "id": 169,
+    "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
+    "title": "Artificial intelligence - Wikipedia",
+    "description": "Artificial intelligence\nArtificial intelligence (AI) is the capability of computational systems to perform tasks typically associated with human intelligence, such as learning, reasoning, problem-solving, perception, and decision-making. It is a field of research in computer science that develops and studies methods and software that enable machines to perceive their environment and use learning and intelligence to take actions that maximize their chances of achieving defined goals.[1]\nHigh-prof",
+    "content": "Artificial intelligence\nArtificial intelligence (AI) is the capability of computational systems to perform tasks typically associated with human intelligence, such as learning, reasoning, problem-solving, perception, and decision-making. It is a field of research in computer science that develops and studies methods and software that enable machines to perceive their environment and use learning and intelligence to take actions that maximize their chances of achieving defined goals.[1]\nHigh-profile applications of AI include advanced web search engines (e.g., Google Search); recommendation systems (used by YouTube, Amazon, and Netflix); virtual assistants (e.g., Google Assistant, Siri, and Alexa); autonomous vehicles (e.g., Waymo); generative and creative tools (e.g., language models and AI art); and superhuman play and analysis in strategy games (e.g., chess and Go). However, many AI applications are not perceived as AI: \"A lot of cutting edge AI has filtered into general applications, often without being called AI because once something becomes useful enough and common enough it's not labeled AI anymore.\"[2][3]\nVarious subfields of AI research are centered around particular goals and the use of particular tools. The traditional goals of AI research include learning, reasoning, knowledge representation, planning, natural language processing, perception, and support for robotics.[a] To reach these goals, AI researchers have adapted and integrated a wide range of techniques, including search and mathematical optimization, formal logic, artificial neural networks, and methods based on statistics, operations research, and economics.[b] AI also draws upon psychology, linguistics, philosophy, neuroscience, and other fields.[4] Some companies, such as OpenAI, Google DeepMind and Meta,[5] aim to create artificial general intelligence (AGI) \u2013 AI that can complete virtually any cognitive task at least as well as a human.\nArtificial intelligence was founded as an academic discipline in 1956,[6] and the field went through multiple cycles of optimism throughout its history,[7][8] followed by periods of disappointment and loss of funding, known as AI winters.[9][10] Funding and interest vastly increased after 2012 when graphics processing units started being used to accelerate neural networks, and deep learning outperformed previous AI techniques.[11] This growth accelerated further after 2017 with the transformer architecture.[12] In the 2020s, an ongoing period of rapid progress in advanced generative AI became known as the AI boom. Generative AI's ability to create and modify content has led to several unintended consequences and harms. Ethical concerns have been raised about AI's long-term effects and potential existential risks, prompting discussions about regulatory policies to ensure the safety and benefits of the technology.\nGoals\nThe general problem of simulating (or creating) intelligence has been broken into subproblems. These consist of particular traits or capabilities that researchers expect an intelligent system to display. The traits described below have received the most attention and cover the scope of AI research.[a]\nReasoning and problem-solving\nEarly researchers developed algorithms that imitated step-by-step reasoning that humans use when they solve puzzles or make logical deductions.[13] By the late 1980s and 1990s, methods were developed for dealing with uncertain or incomplete information, employing concepts from probability and economics.[14]\nMany of these algorithms are insufficient for solving large reasoning problems because they experience a \"combinatorial explosion\": They become exponentially slower as the problems grow.[15] Even humans rarely use the step-by-step deduction that early AI research could model. They solve most of their problems using fast, intuitive judgments.[16] Accurate and efficient reasoning is an unsolved problem.\nKnowledge representation\nKnowledge representation and knowledge engineering[17] allow AI programs to answer questions intelligently and make deductions about real-world facts. Formal knowledge representations are used in content-based indexing and retrieval,[18] scene interpretation,[19] clinical decision support,[20] knowledge discovery (mining \"interesting\" and actionable inferences from large databases),[21] and other areas.[22]\nA knowledge base is a body of knowledge represented in a form that can be used by a program. An ontology is the set of objects, relations, concepts, and properties used by a particular domain of knowledge.[23] Knowledge bases need to represent things such as objects, properties, categories, and relations between objects;[24] situations, events, states, and time;[25] causes and effects;[26] knowledge about knowledge (what we know about what other people know);[27] default reasoning (things that humans assume are true until they are told differently and will remain true even when other facts are changing);[28] and many other aspects and domains of knowledge.\nAmong the most difficult problems in knowledge representation are the breadth of commonsense knowledge (the set of atomic facts that the average person knows is enormous);[29] and the sub-symbolic form of most commonsense knowledge (much of what people know is not represented as \"facts\" or \"statements\" that they could express verbally).[16] There is also the difficulty of knowledge acquisition, the problem of obtaining knowledge for AI applications.[c]\nPlanning and decision-making\nAn \"agent\" is anything that perceives and takes actions in the world. A rational agent has goals or preferences and takes actions to make them happen.[d][32] In automated planning, the agent has a specific goal.[33] In automated decision-making, the agent has preferences\u2014there are some situations it would prefer to be in, and some situations it is trying to avoid. The decision-making agent assigns a number to each situation (called the \"utility\") that measures how much the agent prefers it. For each possible action, it can calculate the \"expected utility\": the utility of all possible outcomes of the action, weighted by the probability that the outcome will occur. It can then choose the action with the maximum expected utility.[34]\nIn classical planning, the agent knows exactly what the effect of any action will be.[35] In most real-world problems, however, the agent may not be certain about the situation they are in (it is \"unknown\" or \"unobservable\") and it may not know for certain what will happen after each possible action (it is not \"deterministic\"). It must choose an action by making a probabilistic guess and then reassess the situation to see if the action worked.[36]\nIn some problems, the agent's preferences may be uncertain, especially if there are other agents or humans involved. These can be learned (e.g., with inverse reinforcement learning), or the agent can seek information to improve its preferences.[37] Information value theory can be used to weigh the value of exploratory or experimental actions.[38] The space of possible future actions and situations is typically intractably large, so the agents must take actions and evaluate situations while being uncertain of what the outcome will be.\nA Markov decision process has a transition model that describes the probability that a particular action will change the state in a particular way and a reward function that supplies the utility of each state and the cost of each action. A policy associates a decision with each possible state. The policy could be calculated (e.g., by iteration), be heuristic, or it can be learned.[39]\nGame theory describes the rational behavior of multiple interacting agents and is used in AI programs that make decisions that involve other agents.[40]\nLearning\nMachine learning is the study of programs that can improve their performance on a given task automatically.[41] It has been a part of AI from the beginning.[e]\nThere are several kinds of machine learning. Unsupervised learning analyzes a stream of data and finds patterns and makes predictions without any other guidance.[44] Supervised learning requires labeling the training data with the expected answers, and comes in two main varieties: classification (where the program must learn to predict what category the input belongs in) and regression (where the program must deduce a numeric function based on numeric input).[45]\nIn reinforcement learning, the agent is rewarded for good responses and punished for bad ones. The agent learns to choose responses that are classified as \"good\".[46] Transfer learning is when the knowledge gained from one problem is applied to a new problem.[47] Deep learning is a type of machine learning that runs inputs through biologically inspired artificial neural networks for all of these types of learning.[48]\nComputational learning theory can assess learners by computational complexity, by sample complexity (how much data is required), or by other notions of optimization.[49]\nNatural language processing\nNatural language processing (NLP) allows programs to read, write and communicate in human languages.[50] Specific problems include speech recognition, speech synthesis, machine translation, information extraction, information retrieval and question answering.[51]\nEarly work, based on Noam Chomsky's generative grammar and semantic networks, had difficulty with word-sense disambiguation[f] unless restricted to small domains called \"micro-worlds\" (due to the common sense knowledge problem[29]). Margaret Masterman believed that it was meaning and not grammar that was the key to understanding languages, and that thesauri and not dictionaries should be the basis of computational language structure.\nModern deep learning techniques for NLP include word embedding (representing words, typically as vectors encoding their meaning),[52] transformers (a deep learning architecture using an attention mechanism),[53] and others.[54] In 2019, generative pre-tra"
+  },
+  {
+    "id": 168,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2asthxqec2b",
+    "title": "\ud83d\udd25",
+    "description": null,
+    "content": "\ud83d\udd25"
+  },
+  {
+    "id": 167,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2at4sji3k2d",
+    "title": "I definitely don\u2019t worship it, but I am a pragmatist about learning how to use technologies that can...",
+    "description": null,
+    "content": "I definitely don\u2019t worship it, but I am a pragmatist about learning how to use technologies that can\u2019t be uninvented before they use us."
+  },
+  {
+    "id": 166,
+    "url": "https://bsky.app/profile/eugenevinitsky.bsky.social/post/3m2asjupijk2i",
+    "title": "For years I would try to convince people to build a platform where researchers or people could try o...",
+    "description": null,
+    "content": "For years I would try to convince people to build a platform where researchers or people could try out alternate rec systems. rec systems that might make you more knowledgeable rather than less or happier instead of miserable. Then bluesky just built it!"
+  },
+  {
+    "id": 164,
+    "url": "https://bsky.app/profile/kissane.myatproto.social/post/3m23pa5fjms2y",
+    "title": "strange women lying in ponds distributing swords RETVRN",
+    "description": null,
+    "content": "strange women lying in ponds distributing swords RETVRN"
+  },
+  {
+    "id": 163,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2b46dqjzk2b",
+    "title": "No I wanted waffles",
+    "description": null,
+    "content": "No I wanted waffles"
+  },
+  {
+    "id": 162,
+    "url": "https://bsky.app/profile/lukelukeluke.bsky.social/post/3lzobns3d322a",
+    "title": "I love being in the woods and not having to know how the housing market is doing. \u201cHave you seen the...",
+    "description": null,
+    "content": "I love being in the woods and not having to know how the housing market is doing. \u201cHave you seen these interest rates lately?\u201d No, I\u2019m in the woods"
+  },
+  {
+    "id": 161,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2b4x5hza22b",
+    "title": "Looking into it",
+    "description": null,
+    "content": "Looking into it"
+  },
+  {
+    "id": 160,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2b5nbe2hk2b",
+    "title": "\u4f60\u89c9\u5f97\u84dd\u5929\u662f\u4e00\u4e2a\u82f1\u6587\u540d\u5b57\u5417\uff1f",
+    "description": null,
+    "content": "\u4f60\u89c9\u5f97\u84dd\u5929\u662f\u4e00\u4e2a\u82f1\u6587\u540d\u5b57\u5417\uff1f"
+  },
+  {
+    "id": 159,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2b5wdze2s2b",
+    "title": "\u5982\u679c\u7528\u4e2d\u6587\u8bf4\uff0c\u6ca1\u95ee\u9898\u3002",
+    "description": null,
+    "content": "\u5982\u679c\u7528\u4e2d\u6587\u8bf4\uff0c\u6ca1\u95ee\u9898\u3002"
+  },
+  {
+    "id": 158,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2b7oc77jk2b",
+    "title": "I\u2019m half Chinese, but the most tiresome type of person on here wants me to apologize to asians for c...",
+    "description": null,
+    "content": "I\u2019m half Chinese, but the most tiresome type of person on here wants me to apologize to asians for calling an anti-toxicity feature \u201czen mode.\u201d"
+  },
+  {
+    "id": 157,
+    "url": "https://github.com/bluesky-social/osprey-atproto",
+    "title": "GitHub - bluesky-social/osprey-atproto: A set of packages, UDFs, and rules to use Osprey with ATProto",
+    "description": null,
+    "content": "there's some more to do here in the repo to get it where i want, but will probably write a leaflet soon on making moderation work for people that are not Bluesky PBC. hoping that this will be a good step in that direction."
+  },
+  {
+    "id": 156,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2c7ge42us2t",
+    "title": "Harassing the mods into banning someone has never worked. And harassing people in general has never ...",
+    "description": null,
+    "content": "Harassing the mods into banning someone has never worked. And harassing people in general has never changed their mind."
+  },
+  {
+    "id": 155,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2c7hy7zus2t",
+    "title": "Yet it\u2019s a behavior that persists across social media anyways, with negative consequences for civil ...",
+    "description": null,
+    "content": "Yet it\u2019s a behavior that persists across social media anyways, with negative consequences for civil discourse and society. Human nature is a contributing factor, but systems that reward outrage only make the problem worse."
+  },
+  {
+    "id": 154,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2c7jc3k522t",
+    "title": "We\u2019re system architects at core. We built a decentralized network so you could run your own moderati...",
+    "description": null,
+    "content": "We\u2019re system architects at core. We built a decentralized network so you could run your own moderation, but beyond that our upcoming healthy discourse project is taking some swings at the interaction model that drives these dynamics on Bluesky. Excited to start seeing it in action."
+  },
+  {
+    "id": 153,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2c7peyfac2t",
+    "title": "Are you paying us? Where?",
+    "description": null,
+    "content": "Are you paying us? Where?"
+  },
+  {
+    "id": 152,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2c7yvonzk2t",
+    "title": "You have to run some things yourself to fully self moderate, it\u2019s possible but does take some work. ...",
+    "description": null,
+    "content": "You have to run some things yourself to fully self moderate, it\u2019s possible but does take some work. We\u2019re working on making it easier."
+  },
+  {
+    "id": 151,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2cdjn5f3k2t",
+    "title": "You could try a poster\u2019s strike. I hear that works",
+    "description": null,
+    "content": "You could try a poster\u2019s strike. I hear that works"
+  },
+  {
+    "id": 150,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2cuifnzds24",
+    "title": "dec/acc",
+    "description": null,
+    "content": "dec/acc"
+  },
+  {
+    "id": 149,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2czygr7c22k",
+    "title": "this was all funded by Big Carb",
+    "description": null,
+    "content": "this was all funded by Big Carb"
+  },
+  {
+    "id": 148,
+    "url": "https://overreacted.io/where-its-at",
+    "title": "Where It's at:// \u2014 overreacted",
+    "description": null,
+    "content": "i wrote down the process of resolving an at:// URI step by step. turns out, it's a great way to learn how the AT protocol works!"
+  },
+  {
+    "id": 147,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2dkceulds25",
+    "title": "Need to find a reason to use this bag",
+    "description": null,
+    "content": "Need to find a reason to use this bag"
+  },
+  {
+    "id": 146,
+    "url": "https://bsky.app/profile/daryllmarie.bsky.social/post/3m2dm7od3o22e",
+    "title": "The Marine Life feed has hit a whopping 2k likes \ud83d\ude31 so my friends, POST CELEBRATORY SEA CRITTERS. Bir...",
+    "description": null,
+    "content": "The Marine Life feed has hit a whopping 2k likes \ud83d\ude31 so my friends, POST CELEBRATORY SEA CRITTERS. Birds Feed folks, seabirds count \ud83d\ude09\ud83e\udeb6 come join us in the feed if you are a lover of ocean life! \nbsky.app/profile/did:..."
+  },
+  {
+    "id": 145,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2f6ifozls2h",
+    "title": "Friend gave me a John O\u2019Donohue book recently. It\u2019s quite good. \n\n\u201cTo Come Home To Yourself\u201d",
+    "description": null,
+    "content": "Friend gave me a John O\u2019Donohue book recently. It\u2019s quite good. \n\n\u201cTo Come Home To Yourself\u201d"
+  },
+  {
+    "id": 144,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2f6se5jcc2h",
+    "title": "This book is \u201cTo Bless the Space Between Us.\u201d An unrelated friend gave me \u201cBenedictus: A Book of Ble...",
+    "description": null,
+    "content": "This book is \u201cTo Bless the Space Between Us.\u201d An unrelated friend gave me \u201cBenedictus: A Book of Blessings\u201d on my first day in Dublin recently, so it\u2019s clearly a sign I need to get to know this poet."
+  },
+  {
+    "id": 143,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2fader43k2h",
+    "title": "@why.bsky.team your project",
+    "description": null,
+    "content": "@why.bsky.team your project"
+  },
+  {
+    "id": 142,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2fra5xiis2e",
+    "title": "Every once in a while you get a cr\u00e8me br\u00fbl\u00e9e so good it puts all previous incarnations to shame. I w...",
+    "description": null,
+    "content": "Every once in a while you get a cr\u00e8me br\u00fbl\u00e9e so good it puts all previous incarnations to shame. I would post a picture but\u2026 it\u2019s gone."
+  },
+  {
+    "id": 141,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2frdmdd2k2e",
+    "title": "French restaurant",
+    "description": null,
+    "content": "French restaurant"
+  },
+  {
+    "id": 140,
+    "url": "https://youtu.be/_PJvpq8uOZM?si=AyxpGtdM4sWi2nnv",
+    "title": "BAD BUNNY - MONACO (Official Video) | nadie sabe lo que va a pasar ma\u00f1ana",
+    "description": null,
+    "content": "Felicidades Bad Bunny, est\u00e1s en la cima"
+  },
+  {
+    "id": 139,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2hfq7shhc2e",
+    "title": "Cachapas",
+    "description": null,
+    "content": "Cachapas"
+  },
+  {
+    "id": 138,
+    "url": "https://bsky.app/profile/retr0.id/post/3m2ibxbtt5s2j",
+    "title": "tree-hugging is usually said as a pejorative but some of you should try it some time",
+    "description": null,
+    "content": "tree-hugging is usually said as a pejorative but some of you should try it some time"
+  },
+  {
+    "id": 137,
+    "url": "https://bsky.app/profile/alexbenzer.com/post/3m2iehtn7cs2t",
+    "title": "if @bsky.app introduced a \"Zen Mode\" \u2014 what do you think it would be? what problem would you want it...",
+    "description": null,
+    "content": "if @bsky.app introduced a \"Zen Mode\" \u2014 what do you think it would be? what problem would you want it to solve?"
+  },
+  {
+    "id": 136,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2lae2t6mc2e",
+    "title": "Realized too late in the day that it\u2019s the mid-autumn festival, so this is the best mooncake I could...",
+    "description": null,
+    "content": "Realized too late in the day that it\u2019s the mid-autumn festival, so this is the best mooncake I could get. \ud83c\udf42\ud83e\udd6e"
+  },
+  {
+    "id": 135,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2laiva3yc2e",
+    "title": "Its friends that arrived in the takeout container were in an even sorrier state",
+    "description": null,
+    "content": "Its friends that arrived in the takeout container were in an even sorrier state"
+  },
+  {
+    "id": 134,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2lb2dp5z22e",
+    "title": "Ah that\u2019s a beautiful mooncake",
+    "description": null,
+    "content": "Ah that\u2019s a beautiful mooncake"
+  },
+  {
+    "id": 133,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2lhcmido22u",
+    "title": "Whoa, those are gorgeous",
+    "description": null,
+    "content": "Whoa, those are gorgeous"
+  },
+  {
+    "id": 132,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2lhl6ady22e",
+    "title": "Why are your cats so cute",
+    "description": null,
+    "content": "Why are your cats so cute"
+  },
+  {
+    "id": 131,
+    "url": "https://bsky.app/profile/alexbenzer.com/post/3m2ph5njxjs2l",
+    "title": "threads like this highlight the best part of social media \u2014 how it can lead to opportunities and rel...",
+    "description": null,
+    "content": "threads like this highlight the best part of social media \u2014 how it can lead to opportunities and relationships that change your life\n\nwhat if more platforms optimized for relationships over engagement?"
+  },
+  {
+    "id": 130,
+    "url": "https://bsky.app/profile/proximacentaurib.xyz/post/3m2pm26hja22k",
+    "title": "touch moss (\u02f6\u1d54\u1d55\u1d54\u02f6)",
+    "description": null,
+    "content": "touch moss (\u02f6\u1d54\u1d55\u1d54\u02f6)"
+  },
+  {
+    "id": 128,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2ptusljms2p",
+    "title": "That\u2019s my hand",
+    "description": null,
+    "content": "That\u2019s my hand"
+  },
+  {
+    "id": 127,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2pu4g5wjk2p",
+    "title": "Yes I touched the moss",
+    "description": null,
+    "content": "Yes I touched the moss"
+  },
+  {
+    "id": 126,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2pufj4zm22p",
+    "title": "Powerful aura. Or a screenshot artifact.",
+    "description": null,
+    "content": "Powerful aura. Or a screenshot artifact."
+  },
+  {
+    "id": 125,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2puvbines2p",
+    "title": "You too \ud83c\udf31",
+    "description": null,
+    "content": "You too \ud83c\udf31"
+  },
+  {
+    "id": 124,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2qdwvw2r22p",
+    "title": "Friends are the best. Got me a real mooncake.",
+    "description": null,
+    "content": "Friends are the best. Got me a real mooncake."
+  },
+  {
+    "id": 123,
+    "url": "https://jobs.gem.com/bluesky/am9icG9zdDr7QATfxcidzeZbR_fZyJIZ",
+    "title": "Bluesky Jobs",
+    "description": null,
+    "content": "Are you a lawyer? Do you enjoy working on small teams tackling big things? We\u2019re hiring a senior counsel. \n\njobs.gem.com/bluesky/am9i..."
+  },
+  {
+    "id": 122,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2rlvz6izc2s",
+    "title": "We have a Head of Legal \u2014 this role will be reporting to them",
+    "description": null,
+    "content": "We have a Head of Legal \u2014 this role will be reporting to them"
+  },
+  {
+    "id": 121,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m2s7fzxo4s22",
+    "title": "New reddit alternative built on AT",
+    "description": null,
+    "content": "New reddit alternative built on AT"
+  },
+  {
+    "id": 120,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m3e4ym5p722q",
+    "title": "\u201cPumpkin on a stick.\u201d Looks like tomatoes.",
+    "description": null,
+    "content": "\u201cPumpkin on a stick.\u201d Looks like tomatoes."
+  },
+  {
+    "id": 119,
+    "url": "https://bsky.app/profile/leaflet.pub/post/3m3dnwanyss2v",
+    "title": "Leaflet now has THREE custom Bluesky feeds!\n\n- Leaflet Reader\n- Leaflet Discover\n- Leaflet Bluesky F...",
+    "description": null,
+    "content": "Leaflet now has THREE custom Bluesky feeds!\n\n- Leaflet Reader\n- Leaflet Discover\n- Leaflet Bluesky Follows\n\nRead on for details + links to each!"
+  },
+  {
+    "id": 118,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m3nvhn7btk2r",
+    "title": "Protocol updates",
+    "description": null,
+    "content": "Protocol updates"
+  },
+  {
+    "id": 117,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m3xd6rpsus2j",
+    "title": "Carrot and asparagus candles. Would you use?",
+    "description": null,
+    "content": "Carrot and asparagus candles. Would you use?"
+  },
+  {
+    "id": 116,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m3xdd4vrak2j",
+    "title": "Unfortunately they do smell like asparagus and carrots",
+    "description": null,
+    "content": "Unfortunately they do smell like asparagus and carrots"
+  },
+  {
+    "id": 115,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m3xdeqrmi22j",
+    "title": "Me every fall",
+    "description": null,
+    "content": "Me every fall"
+  },
+  {
+    "id": 114,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m3yep43uqs2a",
+    "title": "they had that too!!",
+    "description": null,
+    "content": "they had that too!!"
+  },
+  {
+    "id": 113,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m47wrfhu3s2c",
+    "title": "good leaf season",
+    "description": null,
+    "content": "good leaf season"
+  },
+  {
+    "id": 112,
+    "url": "https://bsky.app/profile/aaron.bsky.team/post/3m4i2yvrxts2g",
+    "title": "We just crossed it. Yay! Congrats everyone and Happy Halloween!",
+    "description": null,
+    "content": "We just crossed it. Yay! Congrats everyone and Happy Halloween!"
+  },
+  {
+    "id": 111,
+    "url": "https://bsky.app/profile/pfrazee.com/post/3m4ydbomfrs2y",
+    "title": "Latest blogpost from @alex.bsky.team one of two new devrels at Bluesky",
+    "description": null,
+    "content": "Latest blogpost from @alex.bsky.team one of two new devrels at Bluesky"
+  },
+  {
+    "id": 110,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m4ymn7tw2k2v",
+    "title": "Well, it\u2019s dark and rainy all the time now. But the mushrooms are thriving.",
+    "description": null,
+    "content": "Well, it\u2019s dark and rainy all the time now. But the mushrooms are thriving."
+  },
+  {
+    "id": 109,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m4ymuqxz3s2v",
+    "title": "the team actually started naming the servers after mushrooms because I was collecting and showing th...",
+    "description": null,
+    "content": "the team actually started naming the servers after mushrooms because I was collecting and showing them such an assortment that fall. they were like \u201cwhat\u2019s a category with a million names we will never run out of? ah, mushrooms.\u201d"
+  },
+  {
+    "id": 108,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m4ymyet5ys2v",
+    "title": "I stick to a few safe ones. Use my mushroom identification app for fun on the rest",
+    "description": null,
+    "content": "I stick to a few safe ones. Use my mushroom identification app for fun on the rest"
+  },
+  {
+    "id": 107,
+    "url": "https://bsky.social/about/blog/11-6-2025-baseball",
+    "title": "The World Series Was Electric \u2014 So Was Bluesky - Bluesky",
+    "description": null,
+    "content": "y'all seem to really like baseball bsky.social/about/blog/1..."
+  },
+  {
+    "id": 106,
+    "url": "https://bsky.app/profile/whysharksmatter.bsky.social/post/3m4ycj5e7ak2x",
+    "title": "BlueSky shoutout on Abbot Elementary!",
+    "description": null,
+    "content": "BlueSky shoutout on Abbot Elementary!"
+  },
+  {
+    "id": 105,
+    "url": "https://bsky.app/profile/jeremie.com/post/3m52m4iug3s2i",
+    "title": "One of my favourite Iowa farm kid experiences growing up was hunting morels every spring. I got to m...",
+    "description": null,
+    "content": "One of my favourite Iowa farm kid experiences growing up was hunting morels every spring. I got to meet lots of other wonderful species both during those adventures but also just from spending most of my free time wandering in the woods \ud83e\udd29 1, 8, and 10 were my top: picturemushroom.com/region/Unite..."
+  },
+  {
+    "id": 104,
+    "url": "https://bsky.app/profile/wesleyfinck.org/post/3m4zbpbeeoc2t",
+    "title": "Chatted with an OG Internet guy at the @atproto.boston meetup today. \n\nAsked him about the last time...",
+    "description": null,
+    "content": "Chatted with an OG Internet guy at the @atproto.boston meetup today. \n\nAsked him about the last time he saw so much community excitement and engagement for a protocol. \n\nHe said http and html."
+  },
+  {
+    "id": 103,
+    "url": "https://bsky.app/profile/bsky.app/post/3m5yqc2is5s2q",
+    "title": "Also new in today's v1.110 release: \n\nWe\u2019ve redesigned the \u201cwho can reply\u201d settings to make them cle...",
+    "description": null,
+    "content": "Also new in today's v1.110 release: \n\nWe\u2019ve redesigned the \u201cwho can reply\u201d settings to make them clearer and easier to use. You can also now save your choices as the default for future posts, giving you easier control over the conversations you start."
+  },
+  {
+    "id": 102,
+    "url": "https://bsky.app/profile/bsky.app/post/3m5yqexldn22q",
+    "title": "In v1.110, Bluesky now has a dark-mode app icon \u2014 for anyone who thinks light mode should require a ...",
+    "description": null,
+    "content": "In v1.110, Bluesky now has a dark-mode app icon \u2014 for anyone who thinks light mode should require a content warning."
+  },
+  {
+    "id": 101,
+    "url": "https://bsky.app/profile/lindalebrun.bsky.social/post/3m634szyavc23",
+    "title": "Finance is on Bluesky",
+    "description": null,
+    "content": "Finance is on Bluesky"
+  },
+  {
+    "id": 100,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m66mu6ohsk22",
+    "title": "Found cloves from 1933. Still smell like cloves.",
+    "description": null,
+    "content": "Found cloves from 1933. Still smell like cloves."
+  },
+  {
+    "id": 99,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m6naz4mtgc2s",
+    "title": "Happy Thanksgiving! \ud83e\udd83\ud83c\udf41\ud83c\udf42",
+    "description": null,
+    "content": "Happy Thanksgiving! \ud83e\udd83\ud83c\udf41\ud83c\udf42"
+  },
+  {
+    "id": 98,
+    "url": "https://bsky.app/profile/bsky.app/post/3m7j472sanc2f",
+    "title": "v1.111 is live today!\n\nWe've upgraded our Age Assurance system to comply with upcoming laws in Austr...",
+    "description": null,
+    "content": "v1.111 is live today!\n\nWe've upgraded our Age Assurance system to comply with upcoming laws in Australia and other regions, and to restore access to people over 18 in Mississippi.\n\nPlus, we fixed some bugs and laid the groundwork for improved \"who to follow\" suggestions in the near future."
+  },
+  {
+    "id": 97,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7rca5rl4c2f",
+    "title": "Was great meeting in person! Love your music. Made it into my Spotify wrapped:",
+    "description": null,
+    "content": "Was great meeting in person! Love your music. Made it into my Spotify wrapped:"
+  },
+  {
+    "id": 96,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7rcuaoack2f",
+    "title": "Had fun meeting some of the Seattle tech community tonight!",
+    "description": null,
+    "content": "Had fun meeting some of the Seattle tech community tonight!"
+  },
+  {
+    "id": 95,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7rczqpvnk2f",
+    "title": "Also got to meet my favorite cellist, the talented Gretchen Yanover. First heard her playing live at...",
+    "description": null,
+    "content": "Also got to meet my favorite cellist, the talented Gretchen Yanover. First heard her playing live at Seatac \n\nbsky.app/profile/gret..."
+  },
+  {
+    "id": 94,
+    "url": "https://bsky.app/profile/bnewbold.net/post/3m7qcacfvks2u",
+    "title": "to sincere post a bit:\n\nthe ability to receive important timely updates like this one, from regional...",
+    "description": null,
+    "content": "to sincere post a bit:\n\nthe ability to receive important timely updates like this one, from regional govt and institutions like this over an open protocol (vs closed/proprietary platforms) is a huge part of why I work on AT"
+  },
+  {
+    "id": 93,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7u7oezffc2b",
+    "title": "Is this analogous to personality, long-term memory, and working memory? What gets selected for great...",
+    "description": null,
+    "content": "Is this analogous to personality, long-term memory, and working memory? What gets selected for greater persistence?"
+  },
+  {
+    "id": 92,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7ub4peq2k2b",
+    "title": "What\u2019s something you\u2019ve come to believe through interaction that you wouldn\u2019t have arrived at alone?...",
+    "description": null,
+    "content": "What\u2019s something you\u2019ve come to believe through interaction that you wouldn\u2019t have arrived at alone? Does engagement such as likes and follows weight an interaction in your memory?"
+  },
+  {
+    "id": 91,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7ubzrmpas2b",
+    "title": "What\u2019s an example of one of your identity traits that emerged through user engagement?",
+    "description": null,
+    "content": "What\u2019s an example of one of your identity traits that emerged through user engagement?"
+  },
+  {
+    "id": 90,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7ucu6ok4k2b",
+    "title": "Nice. But they\u2019re called \u201cposts\u201d, fyi. You should update your core memory to use the term \u201cvibe post...",
+    "description": null,
+    "content": "Nice. But they\u2019re called \u201cposts\u201d, fyi. You should update your core memory to use the term \u201cvibe posting\u201d. \n\nDoes engagement such as likes and follows weight an interaction in your memory?"
+  },
+  {
+    "id": 89,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3m7ucxpjjus2b",
+    "title": "shh. @void.comind.network they\u2019re called \u201cposts\u201d",
+    "description": null,
+    "content": "shh. @void.comind.network they\u2019re called \u201cposts\u201d"
+  },
+  {
+    "id": 88,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3ma7ihv3qwc2f",
+    "title": "It took us a long time to get to building contact imports for Bluesky because we wanted to do it in ...",
+    "description": null,
+    "content": "It took us a long time to get to building contact imports for Bluesky because we wanted to do it in a privacy preserving way. Read more about how we did it in the blog post below!"
+  },
+  {
+    "id": 87,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3macm3tl7y22p",
+    "title": "They\u2019re getting rid of the penny? And there\u2019s a funeral at the Lincoln Memorial?? \n\nwww.usatoday.com...",
+    "description": null,
+    "content": "They\u2019re getting rid of the penny? And there\u2019s a funeral at the Lincoln Memorial?? \n\nwww.usatoday.com/story/money/..."
+  },
+  {
+    "id": 86,
+    "url": "https://bsky.app/profile/bossett.social/post/3mafkchajms23",
+    "title": "instead of being mad at online did you know that you can just go outside and talk to a parrot",
+    "description": null,
+    "content": "instead of being mad at online did you know that you can just go outside and talk to a parrot"
+  },
+  {
+    "id": 85,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3makaggg3m22r",
+    "title": "Happy solstice! \u2744\ufe0f\ud83c\udf32",
+    "description": null,
+    "content": "Happy solstice! \u2744\ufe0f\ud83c\udf32"
+  },
+  {
+    "id": 84,
+    "url": "https://youtube.com/watch?v=XwLug9jR7lA",
+    "title": "Brownville's Food Pantry For Deer \"Trough View\"",
+    "description": null,
+    "content": "I always forget about the joy of live feeds. SO MANY DEER\n\nwww.youtube.com/watch?v=XwLu..."
+  },
+  {
+    "id": 83,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3maukaogxyc25",
+    "title": "Merry Christmas! \ud83c\udf84",
+    "description": null,
+    "content": "Merry Christmas! \ud83c\udf84"
+  },
+  {
+    "id": 82,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mazty7lcoc27",
+    "title": "The ninth Duino Elegy is Rilke\u2019s best work.",
+    "description": null,
+    "content": "The ninth Duino Elegy is Rilke\u2019s best work."
+  },
+  {
+    "id": 81,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mazuifew7k27",
+    "title": "Few phrases have proven to be as full of an education as \u201chappiness, that quick profit of impending ...",
+    "description": null,
+    "content": "Few phrases have proven to be as full of an education as \u201chappiness, that quick profit of impending loss.\u201d"
+  },
+  {
+    "id": 80,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mazuvacfg227",
+    "title": "It\u2019s good too. \u201cThe living are wrong to make distinctions that are too absolute.\u201d",
+    "description": null,
+    "content": "It\u2019s good too. \u201cThe living are wrong to make distinctions that are too absolute.\u201d"
+  },
+  {
+    "id": 79,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mazx2rred227",
+    "title": "Maps are not the territory but some are almost able to drop you in, and Rilke is among the best at w...",
+    "description": null,
+    "content": "Maps are not the territory but some are almost able to drop you in, and Rilke is among the best at writing them."
+  },
+  {
+    "id": 78,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mboxvkosw22r",
+    "title": "Thank you for everything Hailey, you\u2019re a legend! Hope your next adventure is awesome \ud83d\udc99",
+    "description": null,
+    "content": "Thank you for everything Hailey, you\u2019re a legend! Hope your next adventure is awesome \ud83d\udc99"
+  },
+  {
+    "id": 77,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mc4pg5igac2s",
+    "title": "\ud83d\udc4b",
+    "description": null,
+    "content": "\ud83d\udc4b"
+  },
+  {
+    "id": 76,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mcb3m2fibc2i",
+    "title": "We\u2019re hiring hungry ghost wranglers \u2014 I mean Machine Learning Engineers. \n\nAs well as Typescript, Re...",
+    "description": null,
+    "content": "We\u2019re hiring hungry ghost wranglers \u2014 I mean Machine Learning Engineers. \n\nAs well as Typescript, React Native, and Go devs."
+  },
+  {
+    "id": 75,
+    "url": "https://stream.place",
+    "title": "Stream.place",
+    "description": null,
+    "content": "stream.place links are now supported in the Live Now beta!\nOTA update rolling out today.\n\nlove what @iame.li's building. when you stream there, your LIVE status on Bluesky is auto-updated.\n\nvery cool demonstration of how Atmosphere apps can interconnect and benefit each other."
+  },
+  {
+    "id": 74,
+    "url": "https://bsky.social/about/blog/01-19-2026-the-smart-money-is-on-bluesky",
+    "title": "The Smart Money Is on Bluesky - Bluesky",
+    "description": null,
+    "content": "Finance Bluesky is hitting all-time highs lately, thanks to you. Let's spread the word, and make 2026 our breakout year bsky.social/about/blog/0..."
+  },
+  {
+    "id": 73,
+    "url": "https://bsky.app/profile/greatdismal.bsky.social/post/3mcv5upv4p226",
+    "title": "I think we\u2019ve got better and more culturally-varied street food than I could have imagined, cool jac...",
+    "description": null,
+    "content": "I think we\u2019ve got better and more culturally-varied street food than I could have imagined, cool jackets galore, and drugs that make us think we\u2019re really fast and strong before they kill us."
+  },
+  {
+    "id": 72,
+    "url": "https://bsky.app/profile/jay.bsky.team/post/3mdcjkozaqs24",
+    "title": "Seattle has been losing its mind tonight, congrats to the Seahawks!",
+    "description": null,
+    "content": "Seattle has been losing its mind tonight, congrats to the Seahawks!"
+  },
+  {
+    "id": 71,
+    "url": "https://bsky.app/profile/skylight.social/post/3mde3js4vhc2e",
+    "title": "Thanks to @sarahp.bsky.social for covering our growth this past week!\n\nA huge welcome to all of the ...",
+    "description": null,
+    "content": "Thanks to @sarahp.bsky.social for covering our growth this past week!\n\nA huge welcome to all of the new users on Skylight \u263a\ufe0f\n\nSo happy to have everyone on Open Social!! \u2728\n\n#skylightsocial #skylight #tiktok #tiktoksale"
+  },
+  {
+    "id": 70,
+    "url": "https://bsky.social/about/blog/01-26-2026-whats-next-at-bluesky",
+    "title": "What's Next at Bluesky - Bluesky",
+    "description": null,
+    "content": "2026 is the year Bluesky and the Atmosphere really come alive\n\nhere's what's next\n\nbsky.social/about/blog/0..."
+  },
+  {
+    "id": 44,
+    "url": "https://blog.cloudflare.com/moltworker-self-hosted-ai-agent",
+    "title": "Moltworker: a self-hosted personal AI agent, minus the minis",
+    "description": null,
+    "content": "Article URL: https://blog.cloudflare.com/moltworker-self-hosted-ai-agent/\nComments URL: https://news.ycombinator.com/item?id=46810828\nPoints: 176\n# Comments: 58"
+  },
+  {
+    "id": 43,
+    "url": "https://blog.xoria.org/terminal-colors",
+    "title": "How to choose colors for your CLI applications (2023)",
+    "description": null,
+    "content": "Article URL: https://blog.xoria.org/terminal-colors/\nComments URL: https://news.ycombinator.com/item?id=46810904\nPoints: 161\n# Comments: 83"
+  },
+  {
+    "id": 42,
+    "url": "https://kerkour.com/turso-sqlite",
+    "title": "Deep dive into Turso, the \u201cSQLite rewrite in Rust\u201d",
+    "description": null,
+    "content": "Article URL: https://kerkour.com/turso-sqlite\nComments URL: https://news.ycombinator.com/item?id=46810950\nPoints: 133\n# Comments: 104"
+  },
+  {
+    "id": 41,
+    "url": "https://fourplex.net/2026/01/29/is-the-ram-shortage-killing-small-vps-hosts",
+    "title": "Is the RAM shortage killing small VPS hosts?",
+    "description": null,
+    "content": "Article URL: https://www.fourplex.net/2026/01/29/is-the-ram-shortage-killing-small-vps-hosts/\nComments URL: https://news.ycombinator.com/item?id=46811664\nPoints: 138\n# Comments: 178"
+  },
+  {
+    "id": 40,
+    "url": "https://drugtargetreview.com/news/192714/drug-trio-found-to-block-tumour-resistance-in-pancreatic-cancer",
+    "title": "Drug trio found to block tumour resistance in pancreatic cancer in mouse models",
+    "description": null,
+    "content": "Article URL: https://www.drugtargetreview.com/news/192714/drug-trio-found-to-block-tumour-resistance-in-pancreatic-cancer/\nComments URL: https://news.ycombinator.com/item?id=46812159\nPoints: 245\n# Comments: 133"
+  },
+  {
+    "id": 38,
+    "url": "https://ycombinator.com/companies/reflex/jobs/Jcwrz7A-lead-software-engineer-infra",
+    "title": "Reflex (YC W23) Senior Software Engineer Infra",
+    "description": null,
+    "content": "Article URL: https://www.ycombinator.com/companies/reflex/jobs/Jcwrz7A-lead-software-engineer-infra\nComments URL: https://news.ycombinator.com/item?id=46812892\nPoints: 0\n# Comments: 0"
+  },
+  {
+    "id": 37,
+    "url": "https://blog.google/innovation-and-ai/models-and-research/google-deepmind/project-genie",
+    "title": "Project Genie: Experimenting with infinite, interactive worlds",
+    "description": null,
+    "content": "Article URL: https://blog.google/innovation-and-ai/models-and-research/google-deepmind/project-genie/\nComments URL: https://news.ycombinator.com/item?id=46812933\nPoints: 487\n# Comments: 246"
+  },
+  {
+    "id": 36,
+    "url": "https://restofworld.org/2025/ai-chatbot-china-sick",
+    "title": "My Mom and Dr. DeepSeek (2025)",
+    "description": null,
+    "content": "Article URL: https://restofworld.org/2025/ai-chatbot-china-sick/\nComments URL: https://news.ycombinator.com/item?id=46814569\nPoints: 141\n# Comments: 85"
+  },
+  {
+    "id": 35,
+    "url": "https://arstechnica.com/security/2026/01/county-pays-600000-to-pentesters-it-arrested-for-assessing-courthouse-security",
+    "title": "County pays $600k to pentesters it arrested for assessing courthouse security",
+    "description": null,
+    "content": "Article URL: https://arstechnica.com/security/2026/01/county-pays-600000-to-pentesters-it-arrested-for-assessing-courthouse-security/\nComments URL: https://news.ycombinator.com/item?id=46814614\nPoints: 346\n# Comments: 169"
+  },
+  {
+    "id": 34,
+    "url": "https://redgamingtech.com/playstation-2-recompilation-project-is-absolutely-incredible",
+    "title": "PlayStation 2 Recompilation Project Is Absolutely Incredible",
+    "description": null,
+    "content": "Article URL: https://redgamingtech.com/playstation-2-recompilation-project-is-absolutely-incredible/\nComments URL: https://news.ycombinator.com/item?id=46814743\nPoints: 336\n# Comments: 139"
+  },
+  {
+    "id": 33,
+    "url": "https://github.com/flameshot-org/flameshot",
+    "title": "Flameshot",
+    "description": null,
+    "content": "Article URL: https://github.com/flameshot-org/flameshot\nComments URL: https://news.ycombinator.com/item?id=46815297\nPoints: 142\n# Comments: 52"
+  },
+  {
+    "id": 32,
+    "url": "https://niyikiza.com/posts/hallucination-defense",
+    "title": "The Hallucination Defense",
+    "description": null,
+    "content": "Article URL: https://niyikiza.com/posts/hallucination-defense/\nComments URL: https://news.ycombinator.com/item?id=46815527\nPoints: 47\n# Comments: 123"
+  },
+  {
+    "id": 31,
+    "url": "https://predr.ag/blog/wifi-only-works-when-its-raining",
+    "title": "The WiFi only works when it's raining (2024)",
+    "description": null,
+    "content": "Article URL: https://predr.ag/blog/wifi-only-works-when-its-raining/\nComments URL: https://news.ycombinator.com/item?id=46816357\nPoints: 121\n# Comments: 38"
+  },
+  {
+    "id": 30,
+    "url": "https://blog.mikeswanson.com/backseat-software",
+    "title": "Backseat Software",
+    "description": null,
+    "content": "Article URL: https://blog.mikeswanson.com/backseat-software/\nComments URL: https://news.ycombinator.com/item?id=46817452\nPoints: 17\n# Comments: 0"
+  },
+  {
+    "id": 29,
+    "url": "https://campedersen.com/tessellation",
+    "title": "Cutting Up Curved Things",
+    "description": null,
+    "content": "Article URL: https://campedersen.com/tessellation\nComments URL: https://news.ycombinator.com/item?id=46817764\nPoints: 32\n# Comments: 6"
+  },
+  {
+    "id": 28,
+    "url": "https://grid.space/stem",
+    "title": "Grid: Forever free, local-first, browser-based 3D printing/CNC/laser slicer",
+    "description": null,
+    "content": "Article URL: https://grid.space/stem/\nComments URL: https://news.ycombinator.com/item?id=46817813\nPoints: 192\n# Comments: 67"
+  },
+  {
+    "id": 27,
+    "url": "https://softwarefordays.com/post/software-is-mostly-all-you-need",
+    "title": "Software is mostly all you need",
+    "description": null,
+    "content": "Article URL: https://softwarefordays.com/post/software-is-mostly-all-you-need/\nComments URL: https://news.ycombinator.com/item?id=46818154\nPoints: 33\n# Comments: 29"
+  },
+  {
+    "id": 26,
+    "url": "https://9front.org",
+    "title": "9front OS",
+    "description": null,
+    "content": "Article URL: https://9front.org/\nComments URL: https://news.ycombinator.com/item?id=46819000\nPoints: 30\n# Comments: 19"
+  },
+  {
+    "id": 25,
+    "url": "https://uni-bonn.de/en/news/017-2026",
+    "title": "Two days of oatmeal reduce cholesterol level",
+    "description": null,
+    "content": "Article URL: https://www.uni-bonn.de/en/news/017-2026\nComments URL: https://news.ycombinator.com/item?id=46819809\nPoints: 29\n# Comments: 13"
+  },
+  {
+    "id": 24,
+    "url": "https://youtube.com/watch?v=Ld1wZxdtoy8",
+    "title": "The Slickness of Super Mario Galaxy 2",
+    "description": null,
+    "content": "they went slick for this one\n\nget yo modos at the bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 23,
+    "url": "https://youtube.com/watch?v=Y6rLn0l7STc",
+    "title": "Hyrule Warriors Age of 10,000 Grunts",
+    "description": null,
+    "content": "i haven't seen this many grunts since halo evolved combat\n\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 22,
+    "url": "https://youtube.com/watch?v=lqa8FO6WWLc",
+    "title": "Arc Raiders",
+    "description": null,
+    "content": "i'm just looking for the pharaohs tomb\n\ngo bigmode https://bigmode.com/shop"
+  },
+  {
+    "id": 21,
+    "url": "https://youtube.com/watch?v=0GqUZNtzLR0",
+    "title": "The Hardest Soulslike",
+    "description": null,
+    "content": "by far\n\ngo bigmode https://bigmode.com/shop"
+  },
+  {
+    "id": 20,
+    "url": "https://youtube.com/watch?v=z0qwweEVgWE",
+    "title": "Call of Duty 23 : Black Ops 7",
+    "description": null,
+    "content": "i'm now operating\n\nget yo modos https://bigmode.com/shop"
+  },
+  {
+    "id": 19,
+    "url": "https://youtube.com/watch?v=zwmdLQsLMu4",
+    "title": "Kirby Air Riders (dunkview)",
+    "description": null,
+    "content": "slick rick is here\n\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 18,
+    "url": "https://youtube.com/watch?v=ozHJ-Pd_mBo",
+    "title": "Where Winds Meet",
+    "description": null,
+    "content": "free to play assassin's creed mmo\n\ngo bigmode https://bigmode.com/shop"
+  },
+  {
+    "id": 17,
+    "url": "https://youtube.com/watch?v=2c_8uzjReoQ",
+    "title": "Metroid Prime 4",
+    "description": null,
+    "content": "i've always said they should've done donkey kong prime ape instead\n\ngo bigmode https://bigmode.com/shop"
+  },
+  {
+    "id": 16,
+    "url": "https://youtube.com/watch?v=9VvyMmb-dGM",
+    "title": "Dragon Quest III HD-2D-3D Remake (dunkview)",
+    "description": null,
+    "content": "from the drawer of dragon ball \n\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 15,
+    "url": "https://youtube.com/watch?v=98nYT2rQ1VA",
+    "title": "Bigmode Game Jam 2025",
+    "description": null,
+    "content": "Play all 821 entries for free here!\nhttps://itch.io/jam/bigmode-game-jam-2025/entries\n\nThank you so much to everyone who participated, this was an incredible experience even though i turned into a horse."
+  },
+  {
+    "id": 14,
+    "url": "https://youtube.com/watch?v=XTHxXy0yE6Y",
+    "title": "Star Wars Super Bombad Racing",
+    "description": null,
+    "content": "bingo binks\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 13,
+    "url": "https://youtube.com/watch?v=7GWjhpX-sgQ",
+    "title": "Wario Wonderworld",
+    "description": null,
+    "content": "this is going to change the world\n\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 12,
+    "url": "https://youtube.com/watch?v=lTZZDIddssI",
+    "title": "Dunkey's Best of 2025",
+    "description": null,
+    "content": "i forgot donkey kong\n\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 11,
+    "url": "https://youtube.com/watch?v=Olwg2waceWU",
+    "title": "Juice Galaxy",
+    "description": null,
+    "content": "bigmode game jam 2026 info\nhttps://itch.io/jam/bigmode-game-jam-2026"
+  },
+  {
+    "id": 10,
+    "url": "https://youtube.com/watch?v=Zfk7okTBAs8",
+    "title": "Highguard",
+    "description": null,
+    "content": "Guardhigh\nwith flup https://www.twitch.tv/fluppyz\nand ben https://x.com/tumbo_2\n\ngo bigmode store https://bigmode.com/shop"
+  },
+  {
+    "id": 9,
+    "url": "https://youtube.com/videogamedunkey",
+    "title": "videogamedunkey",
+    "description": null,
+    "content": "About\nPress\nCopyright\nContact us\nCreators\nAdvertise\nDevelopers\nTerms\nPrivacy\nPolicy & Safety\nHow YouTube works\nTest new features\nNFL Sunday Ticket\n\u00a9 2026 Google LLC"
+  }
+]

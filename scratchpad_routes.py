@@ -1455,6 +1455,7 @@ fetch(apiUrl).then(function(r){return r.json();}).then(function(data){
         var og=lk.og_image_url||'';
         var nc=lk.note_count||0;
         var sc=lk.direct_score||0;
+        var hasSummary=lk.summary&&lk.summary.length>20;
         var thumb=og
             ?'<img src="'+_esc(og)+'" class="thumb" alt="" loading="lazy">'
             :'<div class="thumb-placeholder">&#127760;</div>';
@@ -1462,11 +1463,12 @@ fetch(apiUrl).then(function(r){return r.json();}).then(function(data){
         (lk.tags||[]).slice(0,4).forEach(function(tg){
             pills+='<span class="pill-sm">'+_esc(tg.name||tg.slug||'')+'</span>';
         });
+        var summaryIcon=hasSummary?'<span title="AI Summary available" style="color:#a5b4fc">&#128196;</span>':'';
         h+='<a href="/link/'+lk.id+'" class="link-card">'+thumb+
             '<div class="body"><div class="card-title">'+t+'</div>'+
             '<div class="card-domain">'+_esc(d)+'</div>'+
             '<div class="card-pills">'+pills+'</div>'+
-            '<div class="card-meta"><span>&#128172; '+nc+'</span><span>&#11088; '+sc+'</span></div>'+
+            '<div class="card-meta"><span>&#128172; '+nc+'</span>'+summaryIcon+'<span>&#11088; '+sc+'</span></div>'+
             '</div></a>';
     });
     c.innerHTML=h;

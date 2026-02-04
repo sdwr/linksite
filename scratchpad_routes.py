@@ -821,12 +821,86 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             link_id = existing.data[0]['id']
             return RedirectResponse(url=f"/link/{link_id}", status_code=303)
 
+        # Check if this is a Reddit/HN discussion URL - if so, resolve to the article first
+        from scratchpad_api import resolve_reddit_url, resolve_hn_url
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        resolved_url = None
+        discussion_url = None
+        platform = None
+        
+        if "reddit.com" in domain and "/comments/" in url:
+            resolved_url = resolve_reddit_url(url)
+            discussion_url = url
+            platform = "reddit"
+        elif "news.ycombinator.com" in domain:
+            resolved_url = resolve_hn_url(url)
+            discussion_url = url
+            platform = "hackernews"
+        
+        if resolved_url:
+            # This is a discussion link - use the resolved article URL instead
+            resolved_url = normalize_url(resolved_url)
+            
+            # Check if article already exists
+            existing_article = supabase.table('links').select('id').eq('url', resolved_url).execute()
+            if existing_article.data:
+                link_id = existing_article.data[0]['id']
+            else:
+                # Create the article
+                result = supabase.table('links').insert({
+                    'url': resolved_url,
+                    'title': '',
+                    'description': '',
+                    'submitted_by': 'web',
+                    'source': 'scratchpad',
+                    'processing_status': 'new',
+                    'processing_priority': 10,
+                }).execute()
+                if not result.data:
+                    return RedirectResponse(url="/add?error=Failed+to+create+link", status_code=303)
+                link_id = result.data[0]['id']
+                background_tasks.add_task(_ingest_link_content, link_id, resolved_url)
+                background_tasks.add_task(_ensure_parent_site, resolved_url, link_id)
+            
+            # Add the discussion URL as an external discussion
+            import re
+            external_id = None
+            if platform == "reddit":
+                match = re.search(r'/comments/([a-z0-9]+)', discussion_url)
+                external_id = match.group(1) if match else f"manual-{link_id}"
+            elif platform == "hackernews":
+                match = re.search(r'id=(\d+)', discussion_url)
+                external_id = match.group(1) if match else f"manual-{link_id}"
+            
+            try:
+                supabase.table("external_discussions").upsert({
+                    "link_id": link_id,
+                    "platform": platform,
+                    "external_url": discussion_url,
+                    "external_id": external_id,
+                    "title": "",
+                    "score": 0,
+                    "num_comments": 0,
+                }, on_conflict="link_id,platform,external_id").execute()
+                print(f"[Add] Added {platform} discussion for article {link_id}: {discussion_url}")
+            except Exception as e:
+                print(f"[Add] Error adding external discussion: {e}")
+            
+            # Also fetch other discussions for the article
+            background_tasks.add_task(_fetch_discussions_bg, link_id, resolved_url)
+            return RedirectResponse(url=f"/link/{link_id}?message=Resolved+to+article", status_code=303)
+
+        # Normal link (not a discussion URL)
         insert_data = {
             'url': url,
             'title': '',
             'description': '',
             'submitted_by': 'web',
             'source': 'scratchpad',
+            'processing_status': 'new',
+            'processing_priority': 10,
         }
         result = supabase.table('links').insert(insert_data).execute()
         if not result.data:

@@ -743,77 +743,134 @@ def resolve_reddit_url(reddit_url: str) -> str:
     return None
 
 
-def check_reverse_lookup(url: str, link_id: int):
-    """If URL is an HN or Reddit link, find the original URL and save it."""
+def check_reverse_lookup(url: str, link_id: int) -> int | None:
+    """
+    If URL is an HN or Reddit discussion link, resolve to the original article.
+    
+    NEW BEHAVIOR:
+    - Creates/finds the original article as the PRIMARY link
+    - Adds the Reddit/HN URL as an external_discussion for that article
+    - Deletes the incorrectly created Reddit/HN link entry
+    - Returns the original_link_id so callers can redirect
+    
+    Returns:
+        original_link_id if this was a discussion URL and we resolved it
+        None if this wasn't a discussion URL or resolution failed
+    """
     from urllib.parse import urlparse
+    import re
+    
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
     
     original_url = None
-    is_discussion_platform = False
+    platform = None
+    external_id = None
+    discussion_title = None
     
     if "news.ycombinator.com" in domain:
-        is_discussion_platform = True
+        platform = "hackernews"
         original_url = resolve_hn_url(url)
+        # Extract HN item ID
+        match = re.search(r'id=(\d+)', url)
+        external_id = match.group(1) if match else None
     elif "reddit.com" in domain and "/comments/" in url:
-        is_discussion_platform = True
+        platform = "reddit"
         original_url = resolve_reddit_url(url)
+        # Extract Reddit post ID
+        match = re.search(r'/comments/([a-z0-9]+)', url)
+        external_id = match.group(1) if match else None
     
-    # Mark HN/Reddit links as discussion refs so they're filtered from browse/random
-    if is_discussion_platform:
+    if not platform:
+        # Not a discussion platform URL, nothing to do
+        return None
+    
+    if not original_url:
+        # Couldn't resolve the original URL (self-post or API error)
+        # Mark as discussion-ref but keep the link
         supabase.table("links").update({"source": "discussion-ref"}).eq("id", link_id).execute()
-        print(f"[ExtDisc] Marked link {link_id} as discussion-ref")
+        print(f"[ExtDisc] Marked link {link_id} as discussion-ref (no original URL found)")
+        return None
     
-    if original_url:
-        # Normalize the resolved URL before checking/creating
-        original_url = normalize_url(original_url)
-        
-        # Check if original URL already exists
-        existing = supabase.table("links").select("id").eq("url", original_url).execute()
-        if existing.data:
-            original_link_id = existing.data[0]["id"]
-            # Link the HN/Reddit link as a child of the original
-            supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
-            print(f"[ExtDisc] Reverse: linked {link_id} -> existing {original_link_id} ({original_url})")
-        else:
-            # Create the original link (handle race condition / normalization mismatch)
-            try:
-                resp = supabase.table("links").insert({
-                    "url": original_url,
-                    "source": "reverse-lookup",
-                    "submitted_by": "auto",
-                    "processing_status": "new",
-                    "processing_priority": 5,  # Reverse-lookup = moderate priority
-                }).execute()
-                if resp.data:
-                    original_link_id = resp.data[0]["id"]
-                else:
-                    return
-            except Exception as insert_err:
-                # Likely a unique constraint violation - URL exists with slightly different normalization
-                print(f"[ExtDisc] Insert failed (probably dup), retrying lookup: {insert_err}")
-                retry = supabase.table("links").select("id").eq("url", original_url).execute()
-                if not retry.data:
-                    # Try with/without trailing slash
-                    alt_url = original_url.rstrip('/') + '/' if not original_url.endswith('/') else original_url.rstrip('/')
-                    retry = supabase.table("links").select("id").eq("url", alt_url).execute()
-                if retry.data:
-                    original_link_id = retry.data[0]["id"]
-                    supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
-                    print(f"[ExtDisc] Reverse: linked {link_id} -> existing {original_link_id} (found on retry)")
-                else:
-                    print(f"[ExtDisc] Could not find or create link for {original_url}")
-                return
-            if original_link_id:
-                # Set parent
-                supabase.table("links").update({"parent_link_id": original_link_id}).eq("id", link_id).execute()
-                print(f"[ExtDisc] Reverse: created {original_link_id} ({original_url}) as parent of {link_id}")
-                # Trigger ingestion + external discussion lookup for the original
+    # Normalize the resolved URL
+    original_url = normalize_url(original_url)
+    
+    # Find or create the original article as the primary link
+    original_link_id = None
+    existing = supabase.table("links").select("id, title").eq("url", original_url).execute()
+    
+    if existing.data:
+        original_link_id = existing.data[0]["id"]
+        discussion_title = existing.data[0].get("title")
+        print(f"[ExtDisc] Found existing article {original_link_id}: {original_url}")
+    else:
+        # Create the original article
+        try:
+            resp = supabase.table("links").insert({
+                "url": original_url,
+                "source": "reverse-lookup",
+                "submitted_by": "auto",
+                "processing_status": "new",
+                "processing_priority": 5,
+            }).execute()
+            if resp.data:
+                original_link_id = resp.data[0]["id"]
+                print(f"[ExtDisc] Created article {original_link_id}: {original_url}")
+                # Trigger ingestion for the new article
                 ingest_link_async(original_link_id, original_url)
-                # Also find discussions for the original URL
-                def _disc():
-                    fetch_and_save_external_discussions(original_link_id, original_url)
-                threading.Thread(target=_disc, daemon=True).start()
+        except Exception as e:
+            # Race condition - try to find it again
+            print(f"[ExtDisc] Insert failed, retrying lookup: {e}")
+            retry = supabase.table("links").select("id").eq("url", original_url).execute()
+            if retry.data:
+                original_link_id = retry.data[0]["id"]
+    
+    if not original_link_id:
+        print(f"[ExtDisc] Could not find or create link for {original_url}")
+        return None
+    
+    # Get the title from the discussion link before we delete it
+    disc_link = supabase.table("links").select("title").eq("id", link_id).execute()
+    if disc_link.data:
+        discussion_title = disc_link.data[0].get("title") or discussion_title
+    
+    # Add the Reddit/HN URL as an external_discussion for the article
+    try:
+        supabase.table("external_discussions").upsert({
+            "link_id": original_link_id,
+            "platform": platform,
+            "external_url": url,
+            "external_id": external_id or f"manual-{link_id}",
+            "title": discussion_title,
+            "score": 0,
+            "num_comments": 0,
+        }, on_conflict="link_id,platform,external_id").execute()
+        print(f"[ExtDisc] Added {platform} discussion to article {original_link_id}: {url}")
+    except Exception as e:
+        print(f"[ExtDisc] Error adding external discussion: {e}")
+    
+    # Delete the incorrectly created Reddit/HN link entry (if it's different from original)
+    if link_id != original_link_id:
+        try:
+            # First remove any references to this link
+            supabase.table("links").update({"parent_link_id": None}).eq("parent_link_id", link_id).execute()
+            # Delete the discussion link entry
+            supabase.table("links").delete().eq("id", link_id).execute()
+            print(f"[ExtDisc] Deleted discussion link {link_id}, redirecting to article {original_link_id}")
+        except Exception as e:
+            # If delete fails (FK constraints etc), just mark it as discussion-ref
+            print(f"[ExtDisc] Could not delete link {link_id}, marking as discussion-ref: {e}")
+            supabase.table("links").update({
+                "source": "discussion-ref",
+                "parent_link_id": original_link_id
+            }).eq("id", link_id).execute()
+    
+    # Also fetch discussions for the original article
+    def _disc():
+        fetch_and_save_external_discussions(original_link_id, original_url)
+    threading.Thread(target=_disc, daemon=True).start()
+    
+    return original_link_id
 
 
 # --- API Routes ---

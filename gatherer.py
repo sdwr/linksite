@@ -392,6 +392,28 @@ class GatherScheduler:
         self.running = False
         self._task: Optional[asyncio.Task] = None
         self._last_gather_time = 0.0
+    
+    def get_next_gather_time(self) -> float:
+        """Get the timestamp of when the next gather will run."""
+        if self._last_gather_time == 0:
+            # Never gathered, next gather is now
+            return time.time()
+        return self._last_gather_time + (self.interval_hours * 3600)
+    
+    def get_status(self) -> dict:
+        """Get scheduler status for admin display."""
+        now = time.time()
+        next_gather = self.get_next_gather_time()
+        seconds_until = max(0, next_gather - now)
+        
+        return {
+            "running": self.running,
+            "interval_hours": self.interval_hours,
+            "last_gather_time": self._last_gather_time,
+            "next_gather_time": next_gather,
+            "seconds_until_next": round(seconds_until),
+            "last_gather_ago_sec": round(now - self._last_gather_time) if self._last_gather_time > 0 else None,
+        }
 
     def start(self):
         """Start the gather scheduler."""

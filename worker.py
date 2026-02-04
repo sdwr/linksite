@@ -240,24 +240,25 @@ def _log_job_start(job_type: str, metadata: dict = None) -> str:
     job_id = str(uuid4())
     execute(
         """
-        INSERT INTO job_runs (id, job_type, status, metadata)
-        VALUES (%s, %s, 'running', %s)
+        INSERT INTO job_runs (id, job_type, status, metadata, started_at)
+        VALUES (%s, %s, 'running', %s, now())
         """,
         (job_id, job_type, Json(metadata or {}))
     )
     return job_id
 
 
-def _log_job_complete(job_id: str, items_processed: int, error: str = None):
-    """Mark a job as completed or failed."""
+def _log_job_complete(job_id: str, items_processed: int, error: str = None, links_processed: list = None):
+    """Mark a job as completed or failed, with optional list of processed link IDs."""
     status = "failed" if error else "completed"
     execute(
         """
         UPDATE job_runs 
-        SET status = %s, completed_at = now(), items_processed = %s, errors = %s::jsonb
+        SET status = %s, completed_at = now(), items_processed = %s, errors = %s::jsonb, links_processed = %s::jsonb
         WHERE id = %s
         """,
-        (status, items_processed, json.dumps([error[:500]]) if error else '[]', job_id)
+        (status, items_processed, json.dumps([error[:500]]) if error else '[]', 
+         json.dumps(links_processed or []), job_id)
     )
 
 
@@ -333,6 +334,7 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
         summaries_generated = 0
         discussions_checked = 0
         errors = []
+        processed_link_ids = []  # Track which links we processed
         
         # 3. Process each link
         for link in links:
@@ -381,6 +383,9 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
                     (link_id,)
                 )
                 
+                # Track this link as successfully processed
+                processed_link_ids.append(link_id)
+                
             except Exception as e:
                 error_msg = f"Link {link_id}: {str(e)}"
                 errors.append(error_msg)
@@ -396,8 +401,13 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
                     (link_id,)
                 )
         
-        # 4. Log job completion
-        _log_job_complete(job_id, len(links), "; ".join(errors) if errors else None)
+        # 4. Log job completion with processed link IDs
+        _log_job_complete(
+            job_id, 
+            len(links), 
+            "; ".join(errors) if errors else None,
+            links_processed=processed_link_ids
+        )
         
         result = {
             "processed": len(links),

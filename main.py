@@ -904,7 +904,10 @@ async def admin_gather_all(background_tasks: BackgroundTasks, admin: str = Depen
 
 @app.get("/api/admin/gather/status")
 async def admin_gather_status(admin: str = Depends(verify_admin)):
-    """Get gatherer status and recent job runs."""
+    """Get gatherer status, scheduler info, and recent job runs."""
+    # Get scheduler status with next gather ETA
+    scheduler_status = gather_scheduler.get_status()
+    
     # Get recent job runs
     try:
         recent_runs = supabase.table("job_runs").select("*").eq(
@@ -914,8 +917,11 @@ async def admin_gather_status(admin: str = Depends(verify_admin)):
         recent_runs = type('obj', (object,), {'data': []})()
 
     return {
-        "scheduler_running": gather_scheduler.running,
-        "interval_hours": gather_scheduler.interval_hours,
+        "scheduler_running": scheduler_status["running"],
+        "interval_hours": scheduler_status["interval_hours"],
+        "next_gather_time": scheduler_status["next_gather_time"],
+        "seconds_until_next": scheduler_status["seconds_until_next"],
+        "last_gather_ago_sec": scheduler_status["last_gather_ago_sec"],
         "recent_runs": recent_runs.data or [],
     }
 
@@ -926,15 +932,47 @@ async def admin_job_runs(
     job_type: Optional[str] = None,
     admin: str = Depends(verify_admin)
 ):
-    """Get recent job runs with optional filtering."""
+    """Get recent job runs with optional filtering. Includes link details for expandable view."""
     try:
-        query = supabase.table("job_runs").select("*").order("created_at", desc=True).limit(limit)
+        query = supabase.table("job_runs").select("*").order("started_at", desc=True).limit(limit)
         if job_type:
             query = query.eq("job_type", job_type)
         result = query.execute()
-        return {"runs": result.data or []}
+        runs = result.data or []
+        
+        # Enrich runs with link titles for processed links
+        for run in runs:
+            # Calculate duration from started_at and completed_at
+            if run.get("started_at") and run.get("completed_at"):
+                try:
+                    start = datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))
+                    end = datetime.fromisoformat(run["completed_at"].replace("Z", "+00:00"))
+                    run["duration_seconds"] = round((end - start).total_seconds(), 1)
+                except Exception:
+                    run["duration_seconds"] = None
+            else:
+                run["duration_seconds"] = None
+            
+            # Get link details for links_processed
+            links_processed = run.get("links_processed") or []
+            if links_processed and isinstance(links_processed, list) and len(links_processed) > 0:
+                try:
+                    links_resp = supabase.table("links").select("id, title, url").in_("id", links_processed).execute()
+                    run["links_details"] = links_resp.data or []
+                except Exception:
+                    run["links_details"] = []
+            else:
+                run["links_details"] = []
+        
+        # Get scheduler status for next gather ETA
+        scheduler_status = gather_scheduler.get_status()
+        
+        return {
+            "runs": runs,
+            "scheduler": scheduler_status,
+        }
     except Exception as e:
-        return {"error": str(e), "runs": []}
+        return {"error": str(e), "runs": [], "scheduler": None}
 
 
 # ============================================================
@@ -1441,60 +1479,106 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
         except Exception as e:
             budget_html = f'<div class="card"><h2>&#128176; Monthly AI Budget</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
 
-        # --- Recent Job Runs ---
+        # --- Recent Job Runs (with live refresh) ---
         try:
-            # Try job_runs first, then ai_runs
-            try:
-                runs_resp = supabase.table("job_runs").select("*").order("started_at", desc=True).limit(10).execute()
-                runs = runs_resp.data or []
-            except Exception:
-                runs_resp = supabase.table("ai_runs").select("id, type, status, results_count, created_at, completed_at, error").order("created_at", desc=True).limit(10).execute()
-                runs = []
-                for r in (runs_resp.data or []):
-                    duration = None
-                    if r.get("created_at") and r.get("completed_at"):
-                        try:
-                            start = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
-                            end = datetime.fromisoformat(r["completed_at"].replace("Z", "+00:00"))
-                            duration = int((end - start).total_seconds())
-                        except Exception:
-                            pass
-                    runs.append({
-                        "type": r.get("type", "?"),
-                        "status": r.get("status", "?"),
-                        "started_at": r.get("created_at"),
-                        "duration_seconds": duration,
-                        "items_processed": r.get("results_count"),
-                    })
+            # Get scheduler status for next gather ETA
+            scheduler_status = gather_scheduler.get_status()
+            next_gather_sec = scheduler_status.get("seconds_until_next", 0)
+            next_gather_min = next_gather_sec // 60
+            next_gather_hr = next_gather_min // 60
+            next_gather_min_rem = next_gather_min % 60
+            
+            if next_gather_hr > 0:
+                next_gather_str = f"{next_gather_hr}h {next_gather_min_rem}m"
+            elif next_gather_min > 0:
+                next_gather_str = f"{next_gather_min}m"
+            else:
+                next_gather_str = f"{next_gather_sec}s"
+            
+            last_gather_sec = scheduler_status.get("last_gather_ago_sec")
+            if last_gather_sec:
+                last_gather_min = last_gather_sec // 60
+                last_gather_hr = last_gather_min // 60
+                if last_gather_hr > 0:
+                    last_gather_str = f"{last_gather_hr}h ago"
+                elif last_gather_min > 0:
+                    last_gather_str = f"{last_gather_min}m ago"
+                else:
+                    last_gather_str = f"{last_gather_sec}s ago"
+            else:
+                last_gather_str = "Never"
+            
+            # Try job_runs first
+            runs_resp = supabase.table("job_runs").select("*").order("started_at", desc=True).limit(10).execute()
+            runs = runs_resp.data or []
+            
+            # Calculate duration for each run
+            for run in runs:
+                if run.get("started_at") and run.get("completed_at"):
+                    try:
+                        start = datetime.fromisoformat(run["started_at"].replace("Z", "+00:00"))
+                        end = datetime.fromisoformat(run["completed_at"].replace("Z", "+00:00"))
+                        run["duration_seconds"] = round((end - start).total_seconds(), 1)
+                    except Exception:
+                        run["duration_seconds"] = None
+                else:
+                    run["duration_seconds"] = None
             
             runs_rows = ""
-            for run in runs[:10]:
+            for idx, run in enumerate(runs[:10]):
+                r_id = run.get("id", "")[:8]
                 r_type = _esc(run.get("type") or run.get("job_type") or "?")
                 r_status = run.get("status", "?")
                 r_started = (run.get("started_at") or run.get("created_at") or "")[:19]
                 r_duration = run.get("duration_seconds")
-                r_items = run.get("items_processed") or run.get("links_processed") or "-"
+                r_items = run.get("items_processed") or 0
+                links_processed = run.get("links_processed") or []
                 
-                status_colors = {"completed": "#16a34a", "failed": "#dc2626", "running": "#f59e0b"}
+                status_colors = {"completed": "#16a34a", "failed": "#dc2626", "running": "#f59e0b", "completed_with_errors": "#f59e0b"}
                 s_color = status_colors.get(r_status, "#64748b")
                 
                 dur_str = f"{r_duration}s" if r_duration is not None else "-"
                 
-                runs_rows += f"""<tr>
-                    <td style="font-weight:500">{r_type}</td>
+                # Check if row is expandable (has links_processed)
+                has_details = len(links_processed) > 0 if isinstance(links_processed, list) else False
+                expand_icon = "&#9654;" if has_details else ""
+                row_class = "job-row expandable" if has_details else "job-row"
+                row_id = f"job-row-{idx}"
+                
+                runs_rows += f"""<tr class="{row_class}" data-job-id="{_esc(r_id)}" id="{row_id}" onclick="toggleJobDetails('{row_id}')" style="cursor:{'pointer' if has_details else 'default'}">
+                    <td style="font-weight:500"><span class="expand-icon">{expand_icon}</span> {r_type}</td>
                     <td><span style="color:{s_color};font-weight:600">{_esc(r_status)}</span></td>
                     <td style="font-size:12px;color:#64748b">{r_started}</td>
                     <td style="text-align:center">{dur_str}</td>
                     <td style="text-align:center">{r_items}</td>
                 </tr>"""
+                
+                # Add hidden details row
+                if has_details:
+                    runs_rows += f"""<tr class="job-details" id="{row_id}-details" style="display:none;background:#f8fafc">
+                        <td colspan="5" style="padding:12px 16px">
+                            <strong style="font-size:12px;color:#64748b">Links Processed:</strong>
+                            <div id="{row_id}-links" style="margin-top:8px;font-size:13px">Loading...</div>
+                        </td>
+                    </tr>"""
             
             if not runs_rows:
                 runs_rows = '<tr><td colspan="5" style="color:#94a3b8;text-align:center;padding:16px">No job runs yet</td></tr>'
             
             jobs_html = f"""<div class="card">
-                <h2>&#128203; Recent Job Runs</h2>
+                <h2>&#128203; Recent Job Runs <span id="jobs-refresh-indicator" style="font-size:12px;color:#94a3b8;font-weight:400"></span></h2>
+                <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+                    <div style="background:#f0f9ff;padding:8px 12px;border-radius:6px;font-size:13px">
+                        <span style="color:#64748b">Next gather:</span> 
+                        <span id="next-gather-countdown" style="font-weight:600;color:#1e40af">{next_gather_str}</span>
+                    </div>
+                    <div style="background:#f0fdf4;padding:8px 12px;border-radius:6px;font-size:13px">
+                        <span style="color:#64748b">Last gather:</span> 
+                        <span style="font-weight:600;color:#166534">{last_gather_str}</span>
+                    </div>
+                </div>
                 <div style="overflow-x:auto">
-                <table>
+                <table id="job-runs-table">
                 <thead><tr>
                     <th>Type</th>
                     <th>Status</th>
@@ -1502,11 +1586,126 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
                     <th style="text-align:center">Duration</th>
                     <th style="text-align:center">Items</th>
                 </tr></thead>
-                <tbody>{runs_rows}</tbody>
+                <tbody id="job-runs-tbody">{runs_rows}</tbody>
                 </table>
                 </div>
-            </div>"""
+            </div>
+            <style>
+            .job-row.expandable:hover {{ background: #f8fafc; }}
+            .job-row .expand-icon {{ display: inline-block; width: 16px; transition: transform 0.2s; }}
+            .job-row.expanded .expand-icon {{ transform: rotate(90deg); }}
+            .job-details {{ border-left: 3px solid #2563eb; }}
+            </style>
+            <script>
+            // Toggle job details expansion
+            function toggleJobDetails(rowId) {{
+                const row = document.getElementById(rowId);
+                const detailsRow = document.getElementById(rowId + '-details');
+                if (!detailsRow) return;
+                
+                const isExpanded = row.classList.contains('expanded');
+                if (isExpanded) {{
+                    row.classList.remove('expanded');
+                    detailsRow.style.display = 'none';
+                }} else {{
+                    row.classList.add('expanded');
+                    detailsRow.style.display = 'table-row';
+                    // Load link details if not already loaded
+                    const linksDiv = document.getElementById(rowId + '-links');
+                    if (linksDiv && linksDiv.textContent === 'Loading...') {{
+                        loadJobLinkDetails(rowId);
+                    }}
+                }}
+            }}
+            
+            // Load link details for a job
+            async function loadJobLinkDetails(rowId) {{
+                const linksDiv = document.getElementById(rowId + '-links');
+                try {{
+                    const response = await fetch('/api/admin/job-runs?limit=20');
+                    const data = await response.json();
+                    // Find the matching job by index (rowId is job-row-N)
+                    const idx = parseInt(rowId.replace('job-row-', ''));
+                    const job = data.runs[idx];
+                    if (job && job.links_details && job.links_details.length > 0) {{
+                        linksDiv.innerHTML = job.links_details.map(link => 
+                            `<div style="padding:4px 0;border-bottom:1px solid #e2e8f0">
+                                <a href="/link/${{link.id}}" target="_blank" style="font-weight:500">#${{link.id}}</a>
+                                ${{link.title ? ' — ' + link.title.substring(0, 60) : ''}}
+                            </div>`
+                        ).join('');
+                    }} else {{
+                        linksDiv.innerHTML = '<span style="color:#94a3b8">No link details available</span>';
+                    }}
+                }} catch (e) {{
+                    linksDiv.innerHTML = '<span style="color:#dc2626">Error loading details</span>';
+                }}
+            }}
+            
+            // Live refresh job runs every 10 seconds
+            let refreshInterval;
+            async function refreshJobRuns() {{
+                const indicator = document.getElementById('jobs-refresh-indicator');
+                const tbody = document.getElementById('job-runs-tbody');
+                const countdown = document.getElementById('next-gather-countdown');
+                
+                try {{
+                    indicator.textContent = '(refreshing...)';
+                    const response = await fetch('/api/admin/job-runs?limit=10');
+                    const data = await response.json();
+                    
+                    if (data.runs && data.runs.length > 0) {{
+                        // Update the table with new data (simplified - just show indicator)
+                        indicator.textContent = '(auto-refresh active)';
+                    }}
+                    
+                    // Update next gather countdown
+                    if (data.scheduler && data.scheduler.seconds_until_next !== undefined) {{
+                        const sec = data.scheduler.seconds_until_next;
+                        const hr = Math.floor(sec / 3600);
+                        const min = Math.floor((sec % 3600) / 60);
+                        if (hr > 0) {{
+                            countdown.textContent = hr + 'h ' + min + 'm';
+                        }} else if (min > 0) {{
+                            countdown.textContent = min + 'm';
+                        }} else {{
+                            countdown.textContent = sec + 's';
+                        }}
+                    }}
+                    
+                    setTimeout(() => {{ indicator.textContent = ''; }}, 2000);
+                }} catch (e) {{
+                    indicator.textContent = '(refresh error)';
+                }}
+            }}
+            
+            // Start auto-refresh
+            refreshInterval = setInterval(refreshJobRuns, 10000);
+            
+            // Countdown timer for next gather (updates every second)
+            let nextGatherSec = {next_gather_sec};
+            setInterval(() => {{
+                if (nextGatherSec > 0) {{
+                    nextGatherSec--;
+                    const countdown = document.getElementById('next-gather-countdown');
+                    if (countdown) {{
+                        const hr = Math.floor(nextGatherSec / 3600);
+                        const min = Math.floor((nextGatherSec % 3600) / 60);
+                        const sec = nextGatherSec % 60;
+                        if (hr > 0) {{
+                            countdown.textContent = hr + 'h ' + min + 'm';
+                        }} else if (min > 0) {{
+                            countdown.textContent = min + 'm ' + sec + 's';
+                        }} else {{
+                            countdown.textContent = sec + 's';
+                        }}
+                    }}
+                }}
+            }}, 1000);
+            </script>"""
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             jobs_html = f'<div class="card"><h2>&#128203; Recent Job Runs</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
 
         # --- Manual Triggers ---

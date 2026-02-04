@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Run the gatherer schema migration."""
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import psycopg2
 from db import get_conn
 

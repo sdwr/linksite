@@ -81,13 +81,15 @@ gather_scheduler = GatherScheduler(gatherer, interval_hours=4.0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-start the director and gather scheduler
+    # Auto-start the director, gather scheduler, and background worker
     director.start()
     gather_scheduler.start()
-    print("[App] Ready. Director and GatherScheduler auto-started.")
+    start_background_worker(interval_seconds=90)  # Run processing batch every 90 seconds
+    print("[App] Ready. Director, GatherScheduler, and Worker auto-started.")
     yield
     director.stop()
     gather_scheduler.stop()
+    stop_background_worker()
     await gatherer.close()
 
 
@@ -814,6 +816,49 @@ async def admin_director_status(admin: str = Depends(verify_admin)):
         "global_state": gs,
         "recent_log": log.data or [],
     }
+
+
+# ============================================================
+# Admin: Background Worker Controls
+# ============================================================
+
+@app.get("/api/admin/worker/status")
+async def admin_worker_status(admin: str = Depends(verify_admin)):
+    """Get current worker status: queue size, monthly spend, backoff states."""
+    status = get_worker_status()
+    status["worker_running"] = is_worker_running()
+    return status
+
+
+@app.post("/api/admin/worker/run")
+async def admin_worker_run(
+    background_tasks: BackgroundTasks,
+    batch_size: int = 20,
+    admin: str = Depends(verify_admin)
+):
+    """Manually trigger a processing batch."""
+    async def do_batch():
+        result = await run_processing_batch(batch_size=batch_size)
+        print(f"[Admin] Worker batch complete: {result}")
+
+    background_tasks.add_task(do_batch)
+    return {"status": "started", "batch_size": batch_size, "message": "Processing batch started in background"}
+
+
+@app.post("/api/admin/worker/start")
+async def admin_worker_start(admin: str = Depends(verify_admin)):
+    """Start the background worker if not running."""
+    if is_worker_running():
+        return {"status": "already_running"}
+    start_background_worker(interval_seconds=90)
+    return {"status": "started"}
+
+
+@app.post("/api/admin/worker/stop")
+async def admin_worker_stop(admin: str = Depends(verify_admin)):
+    """Stop the background worker."""
+    stop_background_worker()
+    return {"status": "stopped"}
 
 
 # ============================================================
@@ -1952,6 +1997,193 @@ async def admin_ai_enrich(background_tasks: BackgroundTasks,
         return RedirectResponse(
             url=f"/admin/ai?message=Enrichment started in background ({limit} links)",
             status_code=303)
+
+
+# ============================================================
+# Admin API Endpoints (JSON)
+# ============================================================
+
+from backoff import get_backoff_status
+
+@app.get("/api/admin/queue-status")
+async def api_admin_queue_status(admin: str = Depends(verify_admin)):
+    """Get processing queue status."""
+    try:
+        # Count links by processing status
+        new_count = supabase.table("links").select("id", count="exact").eq("processing_status", "new").execute()
+        processing_count = supabase.table("links").select("id", count="exact").eq("processing_status", "processing").execute()
+        completed_count = supabase.table("links").select("id", count="exact").eq("processing_status", "completed").execute()
+        failed_count = supabase.table("links").select("id", count="exact").eq("processing_status", "failed").execute()
+        
+        # Priority breakdown - user-submitted vs RSS
+        user_submitted = supabase.table("links").select("id", count="exact").eq("source", "scratchpad").eq("processing_status", "new").execute()
+        rss_links = supabase.table("links").select("id", count="exact").neq("source", "scratchpad").eq("processing_status", "new").execute()
+        
+        return {
+            "queue": {
+                "new": new_count.count if hasattr(new_count, 'count') else len(new_count.data or []),
+                "processing": processing_count.count if hasattr(processing_count, 'count') else len(processing_count.data or []),
+                "completed": completed_count.count if hasattr(completed_count, 'count') else len(completed_count.data or []),
+                "failed": failed_count.count if hasattr(failed_count, 'count') else len(failed_count.data or []),
+            },
+            "priority_breakdown": {
+                "user_submitted": user_submitted.count if hasattr(user_submitted, 'count') else len(user_submitted.data or []),
+                "rss_feeds": rss_links.count if hasattr(rss_links, 'count') else len(rss_links.data or []),
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/admin/api-health")
+async def api_admin_api_health(admin: str = Depends(verify_admin)):
+    """Get API health/backoff status for all tracked APIs."""
+    try:
+        apis = ["anthropic", "reddit", "hackernews"]
+        health = {}
+        
+        for api_name in apis:
+            status = get_backoff_status(api_name)
+            health[api_name] = {
+                "status": "backing_off" if status.get("is_backing_off") else "ok",
+                "consecutive_failures": status.get("consecutive_failures", 0),
+                "backoff_until": status.get("backoff_until"),
+                "last_success_at": str(status.get("last_success_at")) if status.get("last_success_at") else None,
+                "last_failure_at": str(status.get("last_failure_at")) if status.get("last_failure_at") else None,
+                "last_error": status.get("last_error"),
+            }
+        
+        return {"apis": health}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/admin/budget-status")
+async def api_admin_budget_status(admin: str = Depends(verify_admin)):
+    """Get monthly AI budget status."""
+    try:
+        # Get current month's usage from ai_token_usage
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        usage_resp = supabase.table("ai_token_usage").select(
+            "estimated_cost_usd"
+        ).gte("created_at", month_start.isoformat()).execute()
+        
+        total_cost = sum(float(r.get("estimated_cost_usd", 0) or 0) for r in (usage_resp.data or []))
+        budget = 50.0  # $50 monthly budget
+        
+        return {
+            "current_spend": round(total_cost, 4),
+            "budget": budget,
+            "percentage": round((total_cost / budget) * 100, 1),
+            "remaining": round(budget - total_cost, 4),
+            "month": now.strftime("%Y-%m"),
+            "warning": total_cost > (budget * 0.8),  # Warning if > 80%
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/admin/job-runs")
+async def api_admin_job_runs(limit: int = 20, admin: str = Depends(verify_admin)):
+    """Get recent job runs."""
+    try:
+        # Try job_runs table first (if exists), fall back to ai_runs
+        try:
+            runs_resp = supabase.table("job_runs").select("*").order("started_at", desc=True).limit(limit).execute()
+            runs = runs_resp.data or []
+        except Exception:
+            # Fall back to ai_runs table
+            runs_resp = supabase.table("ai_runs").select(
+                "id, type, status, results_count, tokens_used, created_at, completed_at, error"
+            ).order("created_at", desc=True).limit(limit).execute()
+            runs = []
+            for r in (runs_resp.data or []):
+                # Calculate duration if both timestamps exist
+                duration = None
+                if r.get("created_at") and r.get("completed_at"):
+                    try:
+                        start = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+                        end = datetime.fromisoformat(r["completed_at"].replace("Z", "+00:00"))
+                        duration = int((end - start).total_seconds())
+                    except Exception:
+                        pass
+                
+                runs.append({
+                    "id": r.get("id"),
+                    "type": r.get("type"),
+                    "status": r.get("status"),
+                    "started_at": r.get("created_at"),
+                    "completed_at": r.get("completed_at"),
+                    "duration_seconds": duration,
+                    "items_processed": r.get("results_count"),
+                    "error": r.get("error"),
+                })
+        
+        return {"job_runs": runs}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/admin/gather/hn")
+async def api_admin_gather_hn(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger Hacker News link gathering."""
+    try:
+        engine = _get_ai_engine()
+        
+        async def _run():
+            return await engine.discover_links(source="hn", count=10)
+        
+        background_tasks.add_task(_run)
+        return {"status": "started", "message": "HN gathering started in background"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/api/admin/gather/reddit")
+async def api_admin_gather_reddit(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger Reddit link gathering."""
+    try:
+        engine = _get_ai_engine()
+        
+        async def _run():
+            return await engine.discover_links(source="reddit", count=10)
+        
+        background_tasks.add_task(_run)
+        return {"status": "started", "message": "Reddit gathering started in background"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/api/admin/worker/run")
+async def api_admin_worker_run(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger AI processing worker batch."""
+    try:
+        engine = _get_ai_engine()
+        
+        async def _run():
+            return await engine.enrich_batch(limit=5, types=["summary", "description", "comments"])
+        
+        background_tasks.add_task(_run)
+        return {"status": "started", "message": "Processing batch started in background"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/api/admin/generate-comment/{link_id}")
+async def api_admin_generate_comment(link_id: int, background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually generate AI comment for a specific link."""
+    try:
+        engine = _get_ai_engine()
+        
+        async def _run():
+            return await engine.enrich_link(link_id, types=["comments"])
+        
+        background_tasks.add_task(_run)
+        return {"status": "started", "message": f"Generating comment for link {link_id}"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 # ============================================================

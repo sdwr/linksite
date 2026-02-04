@@ -26,6 +26,8 @@ from ingest import (
     parse_bluesky_feed, scrape_article, vectorize
 )
 from director import Director
+from gatherer import RSSGatherer, GatherScheduler
+from worker import start_background_worker, stop_background_worker, get_worker_status, run_processing_batch, is_worker_running
 from scratchpad_routes import register_scratchpad_routes
 from user_utils import generate_display_name
 
@@ -67,16 +69,26 @@ def record_action(action: dict):
 
 director = Director(supabase, broadcast_fn=broadcast_event)
 
+# ============================================================
+# RSS Gatherer Setup
+# ============================================================
 
-# --- Lifespan (Director startup/shutdown) ---
+gatherer = RSSGatherer(supabase, broadcast_fn=broadcast_event)
+gather_scheduler = GatherScheduler(gatherer, interval_hours=4.0)
+
+
+# --- Lifespan (Director + Gatherer startup/shutdown) ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-start the director
+    # Auto-start the director and gather scheduler
     director.start()
-    print("[App] Ready. Director auto-started.")
+    gather_scheduler.start()
+    print("[App] Ready. Director and GatherScheduler auto-started.")
     yield
     director.stop()
+    gather_scheduler.stop()
+    await gatherer.close()
 
 
 app = FastAPI(title="Linksite", lifespan=lifespan)
@@ -802,6 +814,78 @@ async def admin_director_status(admin: str = Depends(verify_admin)):
         "global_state": gs,
         "recent_log": log.data or [],
     }
+
+
+# ============================================================
+# Admin: RSS Gatherer Controls
+# ============================================================
+
+@app.post("/api/admin/gather/hn")
+async def admin_gather_hn(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger HN RSS gathering."""
+    async def do_gather():
+        result = await gatherer.gather_hn()
+        print(f"[Admin] HN gather complete: {result}")
+
+    background_tasks.add_task(do_gather)
+    return {"status": "started", "source": "hn", "message": "HN gathering started in background"}
+
+
+@app.post("/api/admin/gather/reddit")
+async def admin_gather_reddit(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger Reddit RSS gathering."""
+    async def do_gather():
+        result = await gatherer.gather_reddit()
+        print(f"[Admin] Reddit gather complete: {result}")
+
+    background_tasks.add_task(do_gather)
+    return {"status": "started", "source": "reddit", "message": "Reddit gathering started in background"}
+
+
+@app.post("/api/admin/gather/all")
+async def admin_gather_all(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
+    """Manually trigger gathering from all sources (HN + Reddit)."""
+    async def do_gather():
+        result = await gatherer.gather_all()
+        print(f"[Admin] Full gather complete: {result}")
+
+    background_tasks.add_task(do_gather)
+    return {"status": "started", "source": "all", "message": "Full gathering started in background"}
+
+
+@app.get("/api/admin/gather/status")
+async def admin_gather_status(admin: str = Depends(verify_admin)):
+    """Get gatherer status and recent job runs."""
+    # Get recent job runs
+    try:
+        recent_runs = supabase.table("job_runs").select("*").eq(
+            "job_type", "gather"
+        ).order("created_at", desc=True).limit(10).execute()
+    except Exception:
+        recent_runs = type('obj', (object,), {'data': []})()
+
+    return {
+        "scheduler_running": gather_scheduler.running,
+        "interval_hours": gather_scheduler.interval_hours,
+        "recent_runs": recent_runs.data or [],
+    }
+
+
+@app.get("/api/admin/job-runs")
+async def admin_job_runs(
+    limit: int = 20,
+    job_type: Optional[str] = None,
+    admin: str = Depends(verify_admin)
+):
+    """Get recent job runs with optional filtering."""
+    try:
+        query = supabase.table("job_runs").select("*").order("created_at", desc=True).limit(limit)
+        if job_type:
+            query = query.eq("job_type", job_type)
+        result = query.execute()
+        return {"runs": result.data or []}
+    except Exception as e:
+        return {"error": str(e), "runs": []}
 
 
 # ============================================================

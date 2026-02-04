@@ -917,6 +917,17 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         if not link.get('tags'):
             tags_html = '<div class="tags-row"><span style="color:#475569;font-size:13px">No tags yet</span></div>'
 
+        # Summary section (if available)
+        summary_html = ""
+        if link.get('summary') and len(link.get('summary', '')) > 20:
+            summary_html = f'''<div style="margin-top:16px;padding:14px 18px;background:linear-gradient(135deg,#1e1b4b,#312e81);border:1px solid #4338ca;border-radius:10px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                    <span style="font-size:16px">&#129302;</span>
+                    <span style="font-weight:600;color:#a5b4fc;font-size:13px">AI Summary</span>
+                </div>
+                <p style="color:#e2e8f0;font-size:14px;line-height:1.6;margin:0">{_esc(link.get('summary', ''))}</p>
+            </div>'''
+
         # Parent link
         parent_html = ""
         if link.get('parent'):
@@ -973,6 +984,7 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
                 <a href="/api/random" class="btn btn-sm" style="background:#312e81;color:#a5b4fc;border:1px solid #4338ca;text-decoration:none;margin-left:auto;white-space:nowrap">&#127922; Next Random</a>
             </div>
             {img_html}
+            {summary_html}
             <div style="display:flex;align-items:baseline;gap:0;flex-wrap:wrap;margin-top:8px">
                 <span style="color:#64748b;font-size:13px;margin-right:8px;font-weight:500;white-space:nowrap">Tags:</span>
                 {tags_html}

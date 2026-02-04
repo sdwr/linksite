@@ -12,7 +12,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, BackgroundTasks, Form, Request, Response, HTTPException
+from fastapi import FastAPI, BackgroundTasks, Form, Request, Response, HTTPException, Depends
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
@@ -78,6 +80,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Linksite", lifespan=lifespan)
+
+# ============================================================
+# Admin Authentication (HTTP Basic Auth)
+# ============================================================
+
+security = HTTPBasic()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify admin credentials. Username can be anything, password must match ADMIN_PASSWORD."""
+    if not ADMIN_PASSWORD:
+        raise HTTPException(
+            status_code=500,
+            detail="ADMIN_PASSWORD not configured on server"
+        )
+    password_correct = secrets.compare_digest(credentials.password.encode("utf8"), ADMIN_PASSWORD.encode("utf8"))
+    if not password_correct:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -261,10 +288,10 @@ def _nav():
         <span class="brand">Linksite</span>
         <a href="/browse">Browse</a>
         <a href="/add">+ Add</a>
-        <a href="/links">Links</a>
         <a href="/admin">Admin</a>
+        <a href="/admin/links">Links</a>
         <a href="/admin/ai">AI Engine</a>
-        <a href="/api/now">API Status</a>
+        <a href="/admin/api-status">API Status</a>
         <a href="/" style="margin-left:auto;background:#2563eb;color:#fff;padding:6px 16px;border-radius:6px;font-size:14px;">Frontend &#10132;</a>
     </nav>"""
 
@@ -738,31 +765,31 @@ async def link_tags(link_id: int):
 # ============================================================
 
 @app.post("/admin/director/start")
-async def admin_director_start():
+async def admin_director_start(admin: str = Depends(verify_admin)):
     director.start()
     return RedirectResponse(url="/admin?message=Director started", status_code=303)
 
 
 @app.post("/admin/director/stop")
-async def admin_director_stop():
+async def admin_director_stop(admin: str = Depends(verify_admin)):
     director.stop()
     return RedirectResponse(url="/admin?message=Director stopped", status_code=303)
 
 
 @app.post("/admin/director/skip")
-async def admin_director_skip():
+async def admin_director_skip(admin: str = Depends(verify_admin)):
     director.skip()
     return RedirectResponse(url="/admin?message=Skip requested", status_code=303)
 
 
 @app.post("/admin/propagate")
-async def admin_propagate():
+async def admin_propagate(admin: str = Depends(verify_admin)):
     director._propagate_scores()
     return RedirectResponse(url="/admin?message=Scores propagated", status_code=303)
 
 
 @app.get("/admin/director/status")
-async def admin_director_status():
+async def admin_director_status(admin: str = Depends(verify_admin)):
     state = supabase.table("global_state").select("*").eq("id", 1).execute()
     gs = state.data[0] if state.data else {}
 
@@ -782,7 +809,7 @@ async def admin_director_status():
 # ============================================================
 
 @app.post("/admin/feeds/{feed_id}/tags")
-async def admin_add_feed_tag(feed_id: int, tag: str = Form(...)):
+async def admin_add_feed_tag(feed_id: int, tag: str = Form(...), admin: str = Depends(verify_admin)):
     slug = tag.lower().strip().replace(" ", "-")
     # Create or get tag
     existing = supabase.table("tags").select("id").eq("slug", slug).execute()
@@ -804,7 +831,7 @@ async def admin_add_feed_tag(feed_id: int, tag: str = Form(...)):
 
 
 @app.post("/admin/feeds/{feed_id}/tags/{slug}/delete")
-async def admin_remove_feed_tag(feed_id: int, slug: str):
+async def admin_remove_feed_tag(feed_id: int, slug: str, admin: str = Depends(verify_admin)):
     tag = supabase.table("tags").select("id").eq("slug", slug).execute()
     if tag.data:
         supabase.table("feed_tags").delete().eq(
@@ -859,8 +886,8 @@ async def root():
     return RedirectResponse(url="/add")
 
 
-@app.get("/links", response_class=HTMLResponse)
-async def view_links(message: Optional[str] = None, feed_id: Optional[int] = None):
+@app.get("/admin/links", response_class=HTMLResponse)
+async def view_links(message: Optional[str] = None, feed_id: Optional[int] = None, admin: str = Depends(verify_admin)):
     try:
         # Get all feeds for the filter bar
         feeds_resp = supabase.table('feeds').select('id, url, type').order('id').execute()
@@ -886,11 +913,11 @@ async def view_links(message: Optional[str] = None, feed_id: Optional[int] = Non
         # --- Filter bar ---
         filter_html = '<div class="filter-bar"><span style="font-size:13px;color:#64748b;">Filter:</span>'
         active_all = ' active' if not feed_id else ''
-        filter_html += f'<a href="/links" class="{active_all}">All</a>'
+        filter_html += f'<a href="/admin/links" class="{active_all}">All</a>'
         for f in feeds:
             active_cls = ' active' if feed_id == f["id"] else ''
             fname = feed_map[f["id"]]["name"]
-            filter_html += f'<a href="/links?feed_id={f["id"]}" class="{active_cls}">{_esc(fname)}</a>'
+            filter_html += f'<a href="/admin/links?feed_id={f["id"]}" class="{active_cls}">{_esc(fname)}</a>'
         filter_html += '</div>'
 
         # --- Table ---
@@ -911,7 +938,7 @@ async def view_links(message: Optional[str] = None, feed_id: Optional[int] = Non
                 <td style="{score_cls};font-weight:600;text-align:center">{score}</td>
                 <td style="text-align:center">{shown}</td>
                 <td>
-                    <form method="POST" action="/links/delete/{lid}" class="inline-form"
+                    <form method="POST" action="/admin/links/delete/{lid}" class="inline-form"
                           onsubmit="return confirm('Delete this link?')">
                         <button class="btn-sm btn-danger" type="submit">&times;</button>
                     </form>
@@ -942,14 +969,14 @@ async def view_links(message: Optional[str] = None, feed_id: Optional[int] = Non
         return HTMLResponse(_page("Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
 
 
-@app.post("/links/delete/{link_id}")
-async def delete_link(link_id: int):
+@app.post("/admin/links/delete/{link_id}")
+async def delete_link(link_id: int, admin: str = Depends(verify_admin)):
     supabase.table('links').delete().eq('id', link_id).execute()
-    return RedirectResponse(url="/links?message=Deleted", status_code=303)
+    return RedirectResponse(url="/admin/links?message=Deleted", status_code=303)
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = None):
+async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = None, admin: str = Depends(verify_admin)):
     try:
         feeds = supabase.table('feeds').select('*').order('created_at', desc=True).execute().data or []
         state = supabase.table("global_state").select("*").eq("id", 1).execute()
@@ -1100,7 +1127,7 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
                         <strong>[{ftype}]</strong> {furl}
                         <div style="font-size:12px;color:#64748b;margin-top:2px">
                             Status: <span style="color:{status_color};font-weight:600">{fstatus}</span>
-                            &middot; Links: <a href="/links?feed_id={fid}">{fcount}</a>
+                            &middot; Links: <a href="/admin/links?feed_id={fid}">{fcount}</a>
                             &middot; Trust: {ftrust:.2f}
                             &middot; Last sync: {_esc(flast)}
                         </div>
@@ -1192,8 +1219,148 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
         return HTMLResponse(_page("Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
 
 
+@app.get("/admin/api-status", response_class=HTMLResponse)
+async def admin_api_status(request: Request, admin: str = Depends(verify_admin)):
+    """HTML page showing current API status (same data as /api/now but in HTML format)."""
+    try:
+        user_id = request.state.user_id
+        now = datetime.now(timezone.utc)
+
+        state = supabase.table("global_state").select("*").eq("id", 1).execute()
+        gs = state.data[0] if state.data else {}
+
+        if not gs.get("current_link_id"):
+            body = '<div class="msg-err">Director not running or no link selected</div>'
+            return HTMLResponse(_page("API Status", body))
+
+        link_id = gs["current_link_id"]
+
+        # Get current link
+        link_resp = supabase.table("links").select(
+            "id, url, title, meta_json, direct_score, feed_id"
+        ).eq("id", link_id).execute()
+        link = link_resp.data[0] if link_resp.data else None
+
+        # Get tags via feed_tags
+        tags = []
+        if link and link.get("feed_id"):
+            ft_resp = supabase.table("feed_tags").select("tag_id").eq("feed_id", link["feed_id"]).execute()
+            tag_ids = [ft["tag_id"] for ft in (ft_resp.data or [])]
+            if tag_ids:
+                tags_resp = supabase.table("tags").select("name, slug").in_("id", tag_ids).execute()
+                tags = tags_resp.data or []
+
+        # Satellites
+        satellites = gs.get("satellites") or []
+        rotation_id = gs.get("started_at", "")
+        for sat in satellites:
+            reveal_at = sat.get("reveal_at")
+            if reveal_at:
+                sat["revealed"] = now >= datetime.fromisoformat(reveal_at.replace("Z", "+00:00"))
+            else:
+                sat["revealed"] = True
+
+            sat_link_id = sat.get("link_id")
+            if sat_link_id:
+                try:
+                    nom_resp = supabase.table("nominations").select("id").eq(
+                        "link_id", sat_link_id
+                    ).eq("rotation_id", rotation_id).execute()
+                    sat["nominations"] = len(nom_resp.data or [])
+                except Exception:
+                    sat["nominations"] = 0
+
+        # Vote counts
+        all_votes = supabase.table("votes").select("value").eq("link_id", link_id).execute()
+        score = sum(v["value"] for v in (all_votes.data or []))
+
+        my_votes = supabase.table("votes").select("created_at").eq(
+            "link_id", link_id
+        ).eq("user_id", user_id).order("created_at", desc=True).execute()
+
+        # Timers
+        rotation_ends = gs.get("rotation_ends_at")
+        seconds_remaining = 0
+        if rotation_ends:
+            ends = datetime.fromisoformat(rotation_ends.replace("Z", "+00:00"))
+            seconds_remaining = max(0, int((ends - now).total_seconds()))
+
+        # Build HTML
+        link_html = f"""<div class="card">
+            <h2>&#127775; Current Featured Link</h2>
+            <div class="kv"><span class="label">ID</span><span>{link.get("id", "?") if link else "-"}</span></div>
+            <div class="kv"><span class="label">Title</span><span>{_esc(link.get("title", "?")[:80]) if link else "-"}</span></div>
+            <div class="kv"><span class="label">URL</span><span><a href="{_esc(link.get("url", ""))}" target="_blank">{_esc((link.get("url", ""))[:60])}</a></span></div>
+            <div class="kv"><span class="label">Direct Score</span><span>{link.get("direct_score", 0) if link else 0}</span></div>
+            <div class="kv"><span class="label">Feed ID</span><span>{link.get("feed_id", "-") if link else "-"}</span></div>
+        </div>"""
+
+        tags_html = " ".join(f'<span class="tag">{_esc(t["name"])}</span>' for t in tags) or '<span style="color:#94a3b8">None</span>'
+        tags_card = f"""<div class="card">
+            <h2>&#127991; Tags</h2>
+            {tags_html}
+        </div>"""
+
+        timer_html = f"""<div class="card">
+            <h2>&#9200; Timers</h2>
+            <div class="kv"><span class="label">Started At</span><span>{_esc((gs.get("started_at") or "-")[:19])}</span></div>
+            <div class="kv"><span class="label">Reveal Ends At</span><span>{_esc((gs.get("reveal_ends_at") or "-")[:19])}</span></div>
+            <div class="kv"><span class="label">Rotation Ends At</span><span>{_esc((rotation_ends or "-")[:19])}</span></div>
+            <div class="kv"><span class="label">Seconds Remaining</span><span style="font-weight:700;color:#2563eb">{seconds_remaining}</span></div>
+        </div>"""
+
+        votes_html = f"""<div class="card">
+            <h2>&#128077; Votes</h2>
+            <div class="kv"><span class="label">Total Score</span><span style="font-weight:700">{score}</span></div>
+            <div class="kv"><span class="label">My Votes Count</span><span>{len(my_votes.data or [])}</span></div>
+            <div class="kv"><span class="label">My Last Vote</span><span>{(my_votes.data[0]["created_at"][:19] if my_votes.data else "-")}</span></div>
+        </div>"""
+
+        sat_rows = ""
+        for s in satellites:
+            revealed_icon = "&#10003;" if s.get("revealed") else "&#10007;"
+            revealed_color = "#16a34a" if s.get("revealed") else "#dc2626"
+            sat_rows += f"""<tr>
+                <td>{s.get("link_id", "?")}</td>
+                <td>{_esc(s.get("title", "?")[:40])}</td>
+                <td>{_esc(s.get("position", "?"))}</td>
+                <td><span style="color:{revealed_color}">{revealed_icon}</span></td>
+                <td>{s.get("nominations", 0)}</td>
+            </tr>"""
+        if not sat_rows:
+            sat_rows = '<tr><td colspan="5" style="color:#94a3b8;text-align:center">No satellites</td></tr>'
+
+        sat_html = f"""<div class="card">
+            <h2>&#128752; Satellites ({len(satellites)})</h2>
+            <table>
+            <thead><tr><th>ID</th><th>Title</th><th>Position</th><th>Revealed</th><th>Nominations</th></tr></thead>
+            <tbody>{sat_rows}</tbody>
+            </table>
+        </div>"""
+
+        meta_html = f"""<div class="card">
+            <h2>&#128203; Meta</h2>
+            <div class="kv"><span class="label">Selection Reason</span><span>{_esc(gs.get("selection_reason", "-"))}</span></div>
+            <div class="kv"><span class="label">Viewer Count</span><span>{len(connected_clients)}</span></div>
+            <div class="kv"><span class="label">Server Time</span><span>{now.isoformat()[:19]}</span></div>
+        </div>"""
+
+        body = link_html
+        body += '<div class="grid-2">'
+        body += timer_html + votes_html
+        body += '</div>'
+        body += '<div class="grid-2">'
+        body += tags_card + meta_html
+        body += '</div>'
+        body += sat_html
+
+        return HTMLResponse(_page("API Status", body))
+    except Exception as e:
+        return HTMLResponse(_page("Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
+
+
 @app.post("/admin/add-feed")
-async def add_feed(url: str = Form(...), type: str = Form(...)):
+async def add_feed(url: str = Form(...), type: str = Form(...), admin: str = Depends(verify_admin)):
     try:
         existing = supabase.table('feeds').select('id').eq('url', url).execute()
         if existing.data:
@@ -1208,7 +1375,7 @@ async def add_feed(url: str = Form(...), type: str = Form(...)):
 
 
 @app.post("/admin/delete-feed/{feed_id}")
-async def delete_feed(feed_id: int):
+async def delete_feed(feed_id: int, admin: str = Depends(verify_admin)):
     supabase.table('links').delete().eq('feed_id', feed_id).execute()
     supabase.table('feed_tags').delete().eq('feed_id', feed_id).execute()
     supabase.table('feeds').delete().eq('id', feed_id).execute()
@@ -1216,20 +1383,20 @@ async def delete_feed(feed_id: int):
 
 
 @app.post("/admin/sync")
-async def sync_feeds(background_tasks: BackgroundTasks):
+async def sync_feeds(background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
     _sync_all_cancel.clear()
     background_tasks.add_task(sync_all_feeds)
     return RedirectResponse(url="/admin?message=Sync started", status_code=303)
 
 
 @app.post("/admin/sync-feed/{feed_id}")
-async def sync_single_feed(feed_id: int, background_tasks: BackgroundTasks):
+async def sync_single_feed(feed_id: int, background_tasks: BackgroundTasks, admin: str = Depends(verify_admin)):
     background_tasks.add_task(sync_feed_by_id, feed_id)
     return RedirectResponse(url="/admin?message=Syncing...", status_code=303)
 
 
 @app.post("/admin/cancel-all")
-async def cancel_all_syncs():
+async def cancel_all_syncs(admin: str = Depends(verify_admin)):
     _sync_all_cancel.set()
     for s in _active_syncs.values():
         s["cancel"] = True
@@ -1329,7 +1496,7 @@ def _get_ai_engine():
 
 
 @app.get("/admin/ai", response_class=HTMLResponse)
-async def admin_ai_dashboard(message: str = None, error: str = None):
+async def admin_ai_dashboard(message: str = None, error: str = None, admin: str = Depends(verify_admin)):
     try:
         engine = _get_ai_engine()
 
@@ -1642,7 +1809,8 @@ async def admin_ai_dashboard(message: str = None, error: str = None):
 async def admin_ai_discover(background_tasks: BackgroundTasks,
                              topic: str = Form(""),
                              count: int = Form(5),
-                             source: str = Form("hn")):
+                             source: str = Form("hn"),
+                             admin: str = Depends(verify_admin)):
     engine = _get_ai_engine()
     topic = topic.strip() or None
 
@@ -1674,7 +1842,8 @@ async def admin_ai_discover(background_tasks: BackgroundTasks,
 @app.post("/admin/ai/enrich")
 async def admin_ai_enrich(background_tasks: BackgroundTasks,
                            limit: int = Form(5),
-                           types: list = Form([])):
+                           types: list = Form([]),
+                           admin: str = Depends(verify_admin)):
     engine = _get_ai_engine()
     if not types:
         types = ["description", "tags", "comments"]

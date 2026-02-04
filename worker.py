@@ -18,6 +18,7 @@ from typing import Optional
 from uuid import uuid4
 
 from db import query, query_one, execute
+from psycopg2.extras import Json
 from backoff import (
     check_backoff, record_success, record_failure, get_backoff_status,
     check_rate_and_backoff, record_request, get_rate_limit_status
@@ -242,7 +243,7 @@ def _log_job_start(job_type: str, metadata: dict = None) -> str:
         INSERT INTO job_runs (id, job_type, status, metadata)
         VALUES (%s, %s, 'running', %s)
         """,
-        (job_id, job_type, metadata or {})
+        (job_id, job_type, Json(metadata or {}))
     )
     return job_id
 

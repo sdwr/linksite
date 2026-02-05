@@ -14,9 +14,6 @@ from psycopg2.extras import RealDictCursor
 _pool = None
 _pool_lock = threading.Lock()
 
-DEFAULT_DATABASE_URL = 'postgresql://postgres:0JvN0xPnOFcxPbmm@db.rsjcdwmgbxthsuyspndt.supabase.co:5432/postgres'
-
-
 def get_pool(min_conn=2, max_conn=10):
     """Get or create the connection pool singleton."""
     global _pool
@@ -25,7 +22,9 @@ def get_pool(min_conn=2, max_conn=10):
     with _pool_lock:
         if _pool is not None:
             return _pool
-        database_url = os.getenv('DATABASE_URL', DEFAULT_DATABASE_URL)
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            raise RuntimeError("DATABASE_URL environment variable is required")
         _pool = pg_pool.ThreadedConnectionPool(
             min_conn, max_conn, database_url
         )

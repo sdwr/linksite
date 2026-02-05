@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Show links table schema."""
 import sys
+import os
+from dotenv import load_dotenv
+
+# Load .env from linksite directory
+load_dotenv('/home/sprite/linksite/.env')
+
 sys.path.insert(0, '/home/sprite/linksite')
 from db import query
 

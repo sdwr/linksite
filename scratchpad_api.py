@@ -1267,3 +1267,122 @@ async def api_random_link(format: Optional[str] = None):
     if format == "json":
         return {"id": chosen, "url": f"/link/{chosen}"}
     return RedirectResponse(url=f"/link/{chosen}", status_code=302)
+
+
+# ============================================================
+# Comments API (futuristic comment cards)
+# ============================================================
+
+class CommentCreate(BaseModel):
+    content: str
+    parent_id: Optional[int] = None
+    user_id: Optional[str] = None
+
+
+def get_link_comments(link_id: int) -> list:
+    """Get comments for a link, enriched with user display names. Returns nested structure."""
+    resp = supabase.table("comments").select("*").eq("link_id", link_id).order("created_at", desc=False).execute()
+    comments = resp.data or []
+    
+    # Batch-fetch user display names
+    user_ids = list(set(c.get("user_id") for c in comments if c.get("user_id")))
+    user_map = {}
+    if user_ids:
+        try:
+            users_resp = supabase.table("users").select("id, display_name").in_("id", user_ids).execute()
+            for u in (users_resp.data or []):
+                user_map[u["id"]] = u.get("display_name", "Anonymous")
+        except Exception:
+            pass
+    
+    # Attach display_name to each comment
+    for comment in comments:
+        uid = comment.get("user_id")
+        if uid and uid in user_map:
+            comment["display_name"] = user_map[uid]
+        else:
+            comment["display_name"] = "Anonymous"
+    
+    # Build nested structure: top-level comments + their replies
+    top_level = [c for c in comments if not c.get("parent_id")]
+    replies_map = {}
+    for c in comments:
+        pid = c.get("parent_id")
+        if pid:
+            replies_map.setdefault(pid, []).append(c)
+    
+    # Attach replies to top-level comments
+    for c in top_level:
+        c["replies"] = replies_map.get(c["id"], [])
+    
+    return top_level
+
+
+@router.get("/api/link/{link_id}/comments")
+async def api_link_comments(link_id: int):
+    """Get comments for a link with nested replies."""
+    return {"comments": get_link_comments(link_id)}
+
+
+@router.post("/api/link/{link_id}/comments")
+async def api_link_comment_create(link_id: int, body: CommentCreate, request: Request):
+    """Create a new comment on a link."""
+    # Get user_id from body or from cookie
+    user_id = body.user_id
+    if not user_id:
+        user_id = getattr(getattr(request, 'state', None), 'user_id', None)
+    
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+    
+    if not body.content or not body.content.strip():
+        raise HTTPException(status_code=400, detail="content required")
+    
+    # Validate parent_id if provided (must be a top-level comment in same link)
+    if body.parent_id:
+        parent_resp = supabase.table("comments").select("id, parent_id, link_id").eq("id", body.parent_id).execute()
+        if not parent_resp.data:
+            raise HTTPException(status_code=400, detail="parent comment not found")
+        parent = parent_resp.data[0]
+        if parent.get("link_id") != link_id:
+            raise HTTPException(status_code=400, detail="parent comment belongs to different link")
+        if parent.get("parent_id"):
+            raise HTTPException(status_code=400, detail="cannot reply to a reply (single-level threading)")
+    
+    insert_data = {
+        "link_id": link_id,
+        "user_id": user_id,
+        "content": body.content.strip(),
+        "parent_id": body.parent_id,
+        "upvotes": 0,
+    }
+    
+    result = supabase.table("comments").insert(insert_data).execute()
+    comment = result.data[0] if result.data else None
+    
+    # Fetch display_name
+    if comment and user_id:
+        try:
+            user_resp = supabase.table("users").select("display_name").eq("id", user_id).execute()
+            if user_resp.data:
+                comment["display_name"] = user_resp.data[0].get("display_name", "Anonymous")
+        except Exception:
+            comment["display_name"] = "Anonymous"
+    
+    return {"ok": True, "comment": comment}
+
+
+@router.post("/api/comment/{comment_id}/upvote")
+async def api_comment_upvote(comment_id: int, request: Request):
+    """Toggle upvote on a comment. For now, just increments (no user tracking)."""
+    # Get current upvotes
+    resp = supabase.table("comments").select("upvotes").eq("id", comment_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="comment not found")
+    
+    current = resp.data[0].get("upvotes", 0) or 0
+    new_count = current + 1
+    
+    supabase.table("comments").update({"upvotes": new_count}).eq("id", comment_id).execute()
+    
+    return {"ok": True, "upvotes": new_count}

@@ -1621,8 +1621,10 @@ function _renderCommentCard(c, index) {
     html += '<div class="replies-thread-line" onclick="_toggleReplies(' + c.id + ')" title="Click to collapse"></div>';
     html += '<div class="replies-inner">';
     if (hasReplies) {
-        c.replies.forEach(function(r) {
+        var lastIdx = c.replies.length - 1;
+        c.replies.forEach(function(r, idx) {
             var rColor = _hashColor(r.display_name || 'anon');
+            var isLast = (idx === lastIdx);
             html += '<div class="reply-card" style="border-color:' + rColor + '50; --card-color:' + rColor + '">';
             html += '<div class="card-header">';
             html += '<span class="user-id" style="color:' + rColor + '">@' + _esc(r.display_name || 'Anonymous') + '</span>';
@@ -1631,7 +1633,21 @@ function _renderCommentCard(c, index) {
             html += '<div class="card-body">' + _esc(r.content || '') + '</div>';
             html += '<div class="card-actions"><div class="card-actions-left">';
             html += '<button class="upvote-btn" onclick="_upvoteComment(' + r.id + ', this)" data-upvotes="' + (r.upvotes||0) + '">&#9650; ' + (r.upvotes || 0) + '</button>';
-            html += '</div></div>';
+            html += '</div>';
+            // Add reply button to last reply in thread
+            if (isLast) {
+                html += '<div class="card-actions-right">';
+                html += '<button class="action-btn reply-btn" onclick="_toggleInlineReply(\'reply-' + c.id + '\', this)" data-comment-id="reply-' + c.id + '">&#128172; Reply</button>';
+                html += '</div>';
+            }
+            html += '</div>';
+            // Add inline reply input to last reply
+            if (isLast) {
+                html += '<div class="inline-reply-input" id="inline-reply-reply-' + c.id + '">';
+                html += '<textarea id="reply-text-reply-' + c.id + '" placeholder="Continue the thread..." rows="1"></textarea>';
+                html += '<button onclick="_submitReply(' + c.id + ')" class="submit-arrow" title="Send">&#8594;</button>';
+                html += '</div>';
+            }
             html += '</div>';
         });
     }

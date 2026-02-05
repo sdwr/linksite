@@ -434,7 +434,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     display: inline-block;
 }
 
-/* Replies container - INSTANT collapse, smooth open */
+/* Replies container - instant fade, smooth slide */
 .replies-container {
     max-height: 0;
     overflow: hidden;
@@ -443,15 +443,15 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     margin-top: 0;
     padding-left: 0;
     position: relative;
-    /* NO transition on close - instant collapse */
-    transition: none;
+    /* On CLOSE: opacity instant, height animates smoothly */
+    transition: max-height 0.25s ease-out, margin-top 0.2s ease-out, opacity 0s;
 }
 
 .replies-container.expanded {
     max-height: 2000px;
     margin-top: 12px;
     opacity: 1;
-    /* Smooth transition only on OPEN */
+    /* On OPEN: smooth transitions for all */
     transition: max-height 0.3s ease-out, margin-top 0.2s ease, opacity 0.15s ease;
 }
 
@@ -597,18 +597,25 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     box-shadow: 0 0 12px rgba(5, 217, 232, 0.4);
 }
 
-/* Inline reply input in reply cards */
+/* Inline reply input in reply cards - always reserve space */
 .reply-card .inline-reply-input {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    display: none;
+    border-top: 1px solid transparent;
+    display: flex;
     gap: 6px;
     align-items: stretch;
+    opacity: 0;
+    visibility: hidden;
+    height: 32px;
+    pointer-events: none;
 }
 
 .reply-card .inline-reply-input.show {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    border-top-color: rgba(255, 255, 255, 0.06);
 }
 
 .reply-card .inline-reply-input textarea {
@@ -631,18 +638,25 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     font-size: 14px;
 }
 
-/* Inline reply input (inside comment card) */
+/* Inline reply input (inside comment card) - always reserve space */
 .inline-reply-input {
     margin-top: 10px;
     padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    display: none;
+    border-top: 1px solid transparent;
+    display: flex;
     gap: 8px;
     align-items: stretch;
+    opacity: 0;
+    visibility: hidden;
+    height: 36px;
+    pointer-events: none;
 }
 
 .inline-reply-input.show {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    border-top-color: rgba(255, 255, 255, 0.08);
 }
 
 .inline-reply-input textarea {
@@ -813,18 +827,35 @@ label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; fon
     display: flex; align-items: center; justify-content: center;
     color: #334155; font-size: 40px;
 }
-.link-card .body { padding: 14px; }
+.link-card .body { 
+    padding: 14px; 
+    display: flex;
+    flex-direction: column;
+    min-height: 120px;
+}
+.link-card .card-title-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 4px;
+}
 .link-card .card-title {
     color: #f1f5f9; font-weight: 600; font-size: 15px;
-    line-height: 1.3; margin-bottom: 4px;
+    line-height: 1.3; flex: 1;
     display: -webkit-box; -webkit-line-clamp: 2;
     -webkit-box-orient: vertical; overflow: hidden;
+}
+.link-card .summary-icon {
+    color: #a5b4fc;
+    font-size: 14px;
+    flex-shrink: 0;
 }
 .link-card .card-domain { color: #64748b; font-size: 12px; margin-bottom: 8px; }
 .link-card .card-pills { margin-bottom: 6px; }
 .link-card .card-meta {
     color: #475569; font-size: 12px;
     display: flex; justify-content: space-between;
+    margin-top: auto;
 }
 .sort-bar {
     display: flex; gap: 8px; margin-bottom: 16px;
@@ -2266,12 +2297,12 @@ fetch(apiUrl).then(function(r){return r.json();}).then(function(data){
         (lk.tags||[]).slice(0,4).forEach(function(tg){
             pills+='<span class="pill-sm">'+_esc(tg.name||tg.slug||'')+'</span>';
         });
-        var summaryIcon=hasSummary?'<span title="AI Summary available" style="color:#a5b4fc">&#128196;</span>':'';
+        var summaryIcon=hasSummary?'<span class="summary-icon" title="AI Summary available">&#128196;</span>':'';
         h+='<a href="/link/'+lk.id+'" class="link-card">'+thumb+
-            '<div class="body"><div class="card-title">'+t+'</div>'+
+            '<div class="body"><div class="card-title-row"><div class="card-title">'+t+'</div>'+summaryIcon+'</div>'+
             '<div class="card-domain">'+_esc(d)+'</div>'+
             '<div class="card-pills">'+pills+'</div>'+
-            '<div class="card-meta"><span>&#128172; '+nc+'</span>'+summaryIcon+'<span>&#11088; '+sc+'</span></div>'+
+            '<div class="card-meta"><span>&#128172; '+nc+'</span><span>&#11088; '+sc+'</span></div>'+
             '</div></a>';
     });
     c.innerHTML=h;

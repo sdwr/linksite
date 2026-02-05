@@ -249,48 +249,49 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .futuristic-comments {
-    margin-top: 24px;
+    margin-top: 8px;
 }
 
-.futuristic-comments h2 {
-    font-size: 18px;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+.futuristic-card-wrapper {
+    position: relative;
+    margin-bottom: 20px;
 }
 
 .futuristic-card {
     position: relative;
-    background: radial-gradient(ellipse at center, rgba(10, 15, 30, 0.95) 0%, rgba(15, 23, 42, 0.8) 70%);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-radius: 24px;
-    padding: 20px;
-    margin-bottom: 16px;
-    border: 2px solid;
-    transition: all 0.3s ease, box-shadow 0.3s ease;
+    background: radial-gradient(ellipse at center, rgba(10, 15, 30, 0.95) 0%, rgba(15, 23, 42, 0.85) 70%);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 16px;
+    padding: 14px 16px;
+    border: 1px solid;
+    transition: transform 0.2s ease, box-shadow 0.25s ease, filter 0.2s ease;
     overflow: hidden;
 }
 
 .futuristic-card:hover {
-    transform: translateY(-5px) scale(1.01);
-    filter: brightness(1.1);
+    transform: scale(1.015);
+    filter: brightness(1.08);
+    box-shadow: 0 0 20px var(--card-color, #60a5fa)50, 0 0 40px var(--card-color, #60a5fa)30, 0 0 60px var(--card-color, #60a5fa)15 !important;
 }
 
 .futuristic-card .card-glow {
     position: absolute;
     inset: -2px;
-    border-radius: 26px;
+    border-radius: 18px;
     pointer-events: none;
+    opacity: 0.3;
+    filter: blur(6px);
+}
+
+.futuristic-card:hover .card-glow {
     opacity: 0.8;
-    animation: pulse-glow 2.5s ease-in-out infinite;
-    filter: blur(8px);
+    animation: pulse-glow 1.5s ease-in-out infinite;
 }
 
 @keyframes pulse-glow {
-    0%, 100% { opacity: 0.5; transform: scale(1); }
-    50% { opacity: 1; transform: scale(1.02); }
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
 }
 
 @keyframes fadeInUp {
@@ -312,24 +313,24 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 6px;
 }
 
 .futuristic-card .user-id {
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13px;
 }
 
 .futuristic-card .timestamp {
     color: #64748b;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .futuristic-card .card-body {
-    color: #e2e8f0;
-    font-size: 14px;
-    line-height: 1.6;
-    margin-bottom: 14px;
+    color: #cbd5e1;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 8px;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -398,147 +399,202 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     text-shadow: 0 0 8px rgba(5, 217, 232, 0.8);
 }
 
+/* Reply handle (juts below card) */
+.reply-handle {
+    position: relative;
+    width: 70%;
+    margin: -8px auto 0;
+    padding: 6px 16px;
+    background: rgba(20, 30, 50, 0.9);
+    border: 1px solid var(--handle-color, #64748b);
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 12px;
+    color: #94a3b8;
+    transition: all 0.25s ease;
+    z-index: 1;
+}
+
+.reply-handle:hover {
+    background: rgba(30, 45, 70, 0.95);
+    color: #e2e8f0;
+    box-shadow: 0 4px 20px var(--handle-color, #64748b)40, 0 0 30px var(--handle-color, #64748b)20;
+    transform: translateY(2px);
+}
+
+.reply-handle.active {
+    background: var(--handle-color, #64748b)20;
+    color: #fff;
+    box-shadow: 0 4px 25px var(--handle-color, #64748b)50;
+}
+
+.reply-handle-text {
+    display: inline-block;
+}
+
 /* Replies container */
-.futuristic-card .replies-container {
+.replies-container {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.3s ease, margin-top 0.3s ease;
+    transition: max-height 0.4s ease-out, margin-top 0.4s ease-out, opacity 0.3s ease;
+    opacity: 0;
+    margin-left: 20px;
+    padding-left: 12px;
+    border-left: 2px solid rgba(100, 116, 139, 0.3);
 }
 
-.futuristic-card .replies-container.expanded {
+.replies-container.expanded {
     max-height: 2000px;
-    margin-top: 16px;
+    margin-top: 12px;
+    opacity: 1;
 }
 
-.futuristic-card .reply-card {
-    margin-left: 24px;
-    padding: 14px;
-    background: radial-gradient(ellipse at center, rgba(20, 30, 50, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
-    border-radius: 16px;
-    border-left: 3px solid;
-    margin-bottom: 10px;
-    transition: all 0.3s ease;
+.close-replies {
+    display: none;
+    text-align: center;
+    padding: 8px;
+    margin-top: 8px;
+    color: #64748b;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s ease;
 }
 
-.futuristic-card .reply-card:hover {
-    transform: translateX(4px);
-    filter: brightness(1.1);
+.close-replies:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
 }
 
-.futuristic-card .reply-card:last-child {
+.replies-container.expanded .close-replies {
+    display: block;
+}
+
+.reply-card {
+    padding: 10px 12px;
+    background: rgba(20, 30, 50, 0.8);
+    border-radius: 10px;
+    border-left: 2px solid;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+}
+
+.reply-card:hover {
+    transform: translateX(3px);
+    filter: brightness(1.08);
+}
+
+.reply-card:last-of-type {
     margin-bottom: 0;
 }
 
-.futuristic-card .reply-input {
-    margin-left: 24px;
-    margin-top: 12px;
-    display: flex;
-    gap: 10px;
+.reply-card .card-header {
+    margin-bottom: 4px;
 }
 
-.futuristic-card .reply-input textarea {
+.reply-card .card-body {
+    font-size: 12px;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+.reply-input {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.reply-input textarea {
     flex: 1;
-    padding: 10px 14px;
+    padding: 8px 12px;
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    border-radius: 10px;
     color: #e2e8f0;
-    font-size: 13px;
+    font-size: 12px;
     font-family: inherit;
     resize: none;
-    min-height: 40px;
+    min-height: 32px;
 }
 
-.futuristic-card .reply-input textarea:focus {
+.reply-input textarea:focus {
     outline: none;
     border-color: var(--neon-cyan);
 }
 
-.futuristic-card .reply-input button {
-    padding: 10px 16px;
+/* Compact submit arrow button */
+.submit-arrow {
+    width: 32px;
+    height: 32px;
+    padding: 0;
     background: linear-gradient(135deg, var(--neon-cyan), var(--neon-blue));
     border: none;
-    border-radius: 12px;
+    border-radius: 50%;
     color: #0f172a;
-    font-weight: 600;
-    font-size: 13px;
+    font-size: 16px;
+    font-weight: 700;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
-.futuristic-card .reply-input button:hover {
-    transform: scale(1.05);
-    box-shadow: 0 0 16px rgba(5, 217, 232, 0.4);
+.submit-arrow:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 16px rgba(5, 217, 232, 0.5);
 }
 
-/* Comment input for new top-level comments */
+.submit-arrow:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Comment input for new top-level comments (slim) */
 .futuristic-comment-input {
-    background: rgba(30, 41, 59, 0.6);
-    backdrop-filter: blur(12px);
-    border-radius: 20px;
-    padding: 16px;
-    margin-bottom: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(30, 41, 59, 0.5);
+    backdrop-filter: blur(8px);
+    border-radius: 14px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.comment-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
 }
 
 .futuristic-comment-input textarea {
-    width: 100%;
-    padding: 12px 16px;
+    flex: 1;
+    padding: 8px 12px;
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 14px;
+    border-radius: 10px;
     color: #e2e8f0;
-    font-size: 14px;
+    font-size: 13px;
     font-family: inherit;
     resize: none;
-    min-height: 60px;
-    margin-bottom: 12px;
-    transition: border-color 0.3s ease;
+    min-height: 36px;
+    max-height: 100px;
+    transition: border-color 0.2s ease, min-height 0.2s ease;
 }
 
 .futuristic-comment-input textarea:focus {
     outline: none;
     border-color: var(--neon-cyan);
-    box-shadow: 0 0 12px rgba(5, 217, 232, 0.2);
+    box-shadow: 0 0 10px rgba(5, 217, 232, 0.15);
+    min-height: 60px;
 }
 
-.futuristic-comment-input .input-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.futuristic-comment-input .commenting-as {
-    font-size: 12px;
-    color: #64748b;
-}
-
-.futuristic-comment-input .commenting-as strong {
-    color: var(--neon-cyan);
-}
-
-.futuristic-comment-input button {
-    padding: 10px 24px;
+.futuristic-comment-input .submit-arrow {
     background: linear-gradient(135deg, var(--neon-purple), var(--neon-pink));
-    border: none;
-    border-radius: 14px;
-    color: #fff;
-    font-weight: 600;
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.futuristic-comment-input button:hover {
-    transform: scale(1.05);
-    box-shadow: 0 0 25px rgba(188, 19, 254, 0.5), 0 0 50px rgba(255, 0, 110, 0.3);
-    filter: brightness(1.15);
-}
-
-.futuristic-comment-input button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
 }
 
 /* Empty state */
@@ -1343,26 +1399,12 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             p = link['parent']
             parent_html = f'<div style="margin-bottom:12px"><span style="color:#64748b;font-size:13px">Part of:</span> <a href="/link/{p["id"]}">{_esc(p.get("title") or p.get("url"))}</a></div>'
 
-        # --- Old notes section: just the input form + a placeholder for lazy-loaded notes ---
-        comments_shell = f'''<div class="commenting-as" id="commenting-as"></div>
-        <div class="comment-input">
-            <form method="POST" action="/link/{link_id}/add-note" style="display:flex;gap:10px;width:100%">
-                <textarea name="text" placeholder="Add a note..." required rows="1"
-                    onfocus="this.rows=3" onblur="if(!this.value)this.rows=1"
-                    onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){{event.preventDefault();this.form.submit()}}"></textarea>
-                <input type="hidden" name="author" value="anon" id="comment-author">
-            </form>
-        </div>
-        <div id="notes-container"><div class="lazy-loader">Loading notes&hellip;</div></div>'''
-
-        # --- Futuristic Comments Section ---
+        # --- Futuristic Comments Section (streamlined) ---
         futuristic_comments_shell = '''<div class="futuristic-comments">
-            <h2>&#128172; Comments</h2>
             <div class="futuristic-comment-input" id="new-comment-form">
-                <textarea id="new-comment-text" placeholder="Share your thoughts..." rows="2"></textarea>
-                <div class="input-footer">
-                    <span class="commenting-as" id="futuristic-commenting-as">Commenting as <strong>Anonymous</strong></span>
-                    <button onclick="_submitNewComment()" id="submit-comment-btn">Post Comment</button>
+                <div class="comment-input-row">
+                    <textarea id="new-comment-text" placeholder="Share your thoughts..." rows="1"></textarea>
+                    <button onclick="_submitNewComment()" id="submit-comment-btn" class="submit-arrow" title="Post">&#8594;</button>
                 </div>
             </div>
             <div id="futuristic-comments-container">
@@ -1417,10 +1459,6 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
         </div>
 
         <div class="card">
-            {comments_shell}
-        </div>
-
-        <div class="card">
             {futuristic_comments_shell}
         </div>
 
@@ -1436,22 +1474,6 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             + "var PROCESSING_STATUS=" + _json.dumps(processing_status) + ";\n"
             + "var HAS_SUMMARY=" + _json.dumps(has_summary) + ";\n"
             + r"""
-// --- Load notes ---
-fetch('/api/link/'+LID+'/notes').then(function(r){return r.json();}).then(function(data){
-    var c=document.getElementById('notes-container');var notes=data.notes||[];var h='';
-    if(!notes.length){h='<p style="color:#475569;font-size:13px;padding:8px 0">No notes yet.</p>';}
-    else{notes.forEach(function(n){
-        h+='<div class="comment"><div class="vote-col">'+
-        '<button class="vote-btn up" title="Upvote">&#9650;</button>'+
-        '<span class="vote-score">&middot;</span>'+
-        '<button class="vote-btn down" title="Downvote">&#9660;</button>'+
-        '</div><div class="comment-body">'+
-        '<div class="comment-meta"><strong>'+_esc(n.display_name||n.author||'anonymous')+'</strong> &middot; '+_ago(n.created_at)+'</div>'+
-        '<div class="comment-text">'+_esc(n.text||'')+'</div></div></div>';
-    });}
-    c.innerHTML=h;
-}).catch(function(){document.getElementById('notes-container').innerHTML='<p style="color:#f87171;font-size:13px">Failed to load notes.</p>';});
-
 // ============================================================
 // Futuristic Comments System
 // ============================================================
@@ -1469,16 +1491,17 @@ function _hashColor(str) {
     return NEON_COLORS[Math.abs(hash) % NEON_COLORS.length];
 }
 
-// Build gradient glow style for a card (inner glow effect)
+// Build gradient glow style for a card (subtle passive, strong hover via CSS)
 function _glowStyle(color) {
-    return 'background: radial-gradient(ellipse at center, transparent 20%, ' + color + '15 60%, ' + color + '30 100%); ' +
-           'box-shadow: inset 0 0 50px ' + color + '20;';
+    return 'background: radial-gradient(ellipse at center, transparent 40%, ' + color + '08 80%, ' + color + '12 100%); ' +
+           'box-shadow: inset 0 0 30px ' + color + '08;';
 }
 
-// Build border style with intense outer glow
+// Build border style (subtle passive glow - hover enhancement via CSS)
 function _borderStyle(color) {
-    return 'border-color: ' + color + '; ' +
-           'box-shadow: 0 0 15px ' + color + '40, 0 0 30px ' + color + '25, 0 0 45px ' + color + '15, inset 0 0 20px ' + color + '10;';
+    return 'border-color: ' + color + '60; ' +
+           '--card-color: ' + color + '; ' +
+           'box-shadow: 0 0 8px ' + color + '15, 0 0 16px ' + color + '08;';
 }
 
 // Render a single comment card
@@ -1487,7 +1510,8 @@ function _renderCommentCard(c, index) {
     var hasReplies = c.replies && c.replies.length > 0;
     var replyCount = hasReplies ? c.replies.length : 0;
     
-    var html = '<div class="futuristic-card fade-in" data-comment-id="' + c.id + '" style="' + _borderStyle(color) + 'animation-delay:' + (index * 0.1) + 's">';
+    var html = '<div class="futuristic-card-wrapper">';
+    html += '<div class="futuristic-card fade-in" data-comment-id="' + c.id + '" style="' + _borderStyle(color) + 'animation-delay:' + (index * 0.05) + 's">';
     html += '<div class="card-glow" style="' + _glowStyle(color) + '"></div>';
     html += '<div class="card-header">';
     html += '<span class="user-id" style="color:' + color + '">@' + _esc(c.display_name || 'Anonymous') + '</span>';
@@ -1498,10 +1522,12 @@ function _renderCommentCard(c, index) {
     html += '<div class="card-actions-left">';
     html += '<button class="upvote-btn" onclick="_upvoteComment(' + c.id + ', this)" data-upvotes="' + (c.upvotes||0) + '">&#9650; ' + (c.upvotes || 0) + '</button>';
     html += '</div>';
-    html += '<div class="card-actions-right">';
-    html += '<button class="action-btn reply-btn" onclick="_toggleReplies(' + c.id + ', this)">&#128172; ' + (replyCount > 0 ? replyCount : '') + '</button>';
-    html += '<button class="action-btn">&#8943;</button>';
     html += '</div>';
+    html += '</div>';
+    
+    // Reply handle (juts below the card)
+    html += '<div class="reply-handle" onclick="_toggleReplies(' + c.id + ', this)" data-comment-id="' + c.id + '" style="--handle-color:' + color + '">';
+    html += '<span class="reply-handle-text">' + (replyCount > 0 ? '&#128172; ' + replyCount + ' repl' + (replyCount === 1 ? 'y' : 'ies') : '&#128172; Reply') + '</span>';
     html += '</div>';
     
     // Replies container
@@ -1521,11 +1547,13 @@ function _renderCommentCard(c, index) {
             html += '</div>';
         });
     }
-    // Reply input
+    // Reply input (compact)
     html += '<div class="reply-input">';
     html += '<textarea id="reply-text-' + c.id + '" placeholder="Write a reply..." rows="1"></textarea>';
-    html += '<button onclick="_submitReply(' + c.id + ')">Reply</button>';
+    html += '<button onclick="_submitReply(' + c.id + ')" class="submit-arrow" title="Send">&#8594;</button>';
     html += '</div>';
+    // Close handle when expanded
+    html += '<div class="close-replies" onclick="_toggleReplies(' + c.id + ', document.querySelector(\'[data-comment-id=\\\''+c.id+'\\\']\'))">&#10005; Close</div>';
     html += '</div>';
     
     html += '</div>';
@@ -1559,25 +1587,41 @@ function _toggleReplies(commentId, btn) {
     var container = document.getElementById('replies-' + commentId);
     if (!container) return;
     
+    var handle = document.querySelector('.reply-handle[data-comment-id="' + commentId + '"]');
     var isExpanded = container.classList.contains('expanded');
+    
     container.classList.toggle('expanded');
-    btn.classList.toggle('active');
+    if (handle) handle.classList.toggle('active');
+    if (btn) btn.classList.toggle('active');
 }
 
-// Upvote a comment
+// Upvote a comment (optimistic UI)
 function _upvoteComment(commentId, btn) {
-    btn.disabled = true;
+    if (btn.classList.contains('active')) return; // Already upvoted
+    
+    // Optimistic update - immediately show the change
+    var currentCount = parseInt(btn.getAttribute('data-upvotes') || '0');
+    var newCount = currentCount + 1;
+    btn.setAttribute('data-upvotes', newCount);
+    btn.innerHTML = '&#9650; ' + newCount;
+    btn.classList.add('active');
+    
+    // Send API call in background (don't wait for response)
     fetch('/api/comment/' + commentId + '/upvote', { method: 'POST' })
         .then(function(r) { return r.json(); })
         .then(function(data) {
-            if (data.ok) {
+            // Sync with server count if different
+            if (data.ok && data.upvotes !== newCount) {
+                btn.setAttribute('data-upvotes', data.upvotes);
                 btn.innerHTML = '&#9650; ' + data.upvotes;
-                btn.classList.add('active');
-                btn.style.animation = 'pulse-glow 0.5s ease';
             }
-            btn.disabled = false;
         })
-        .catch(function() { btn.disabled = false; });
+        .catch(function() {
+            // Revert on error
+            btn.setAttribute('data-upvotes', currentCount);
+            btn.innerHTML = '&#9650; ' + currentCount;
+            btn.classList.remove('active');
+        });
 }
 
 // Submit a new top-level comment
@@ -1593,7 +1637,7 @@ function _submitNewComment() {
     }
     
     btn.disabled = true;
-    btn.textContent = 'Posting...';
+    btn.innerHTML = '&#8987;'; // Hourglass while posting
     
     fetch('/api/link/' + LID + '/comments', {
         method: 'POST',
@@ -1609,12 +1653,12 @@ function _submitNewComment() {
             alert('Failed to post comment: ' + (data.detail || 'Unknown error'));
         }
         btn.disabled = false;
-        btn.textContent = 'Post Comment';
+        btn.innerHTML = '&#8594;';
     })
     .catch(function(e) {
         alert('Failed to post comment');
         btn.disabled = false;
-        btn.textContent = 'Post Comment';
+        btn.innerHTML = '&#8594;';
     });
 }
 
@@ -1646,16 +1690,10 @@ function _submitReply(parentId) {
     .catch(function() { alert('Failed to post reply'); });
 }
 
-// Load user info and comments
+// Load user info
 fetch('/api/me').then(function(r) { return r.json(); }).then(function(data) {
     _currentUserId = data.user_id;
     _currentDisplayName = data.display_name || 'Anonymous';
-    
-    var caEl = document.getElementById('futuristic-commenting-as');
-    if (caEl) {
-        var color = _hashColor(_currentDisplayName);
-        caEl.innerHTML = 'Commenting as <strong style="color:' + color + '">@' + _esc(_currentDisplayName) + '</strong>';
-    }
 }).catch(function() {});
 
 // Load comments on page load

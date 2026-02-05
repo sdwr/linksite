@@ -438,7 +438,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .replies-container {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-top 0.3s ease, opacity 0.25s ease;
+    transition: max-height 0.35s ease-out, margin-top 0.25s ease-out, opacity 0.2s ease-out;
     opacity: 0;
     margin-left: 0;
     padding-left: 0;
@@ -449,6 +449,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     max-height: 2000px;
     margin-top: 12px;
     opacity: 1;
+    transition: max-height 0.4s ease-in, margin-top 0.3s ease, opacity 0.25s ease;
 }
 
 /* Clickable thread line on left side */
@@ -571,7 +572,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     border-top: 1px solid rgba(255, 255, 255, 0.08);
     display: none;
     gap: 8px;
-    align-items: center;
+    align-items: stretch;
 }
 
 .inline-reply-input.show {
@@ -588,6 +589,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     font-size: 13px;
     font-family: inherit;
     resize: none;
+    height: 36px;
     min-height: 36px;
 }
 
@@ -595,6 +597,10 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     outline: none;
     border-color: var(--neon-cyan);
     box-shadow: 0 0 8px rgba(5, 217, 232, 0.15);
+}
+
+.inline-reply-input .submit-arrow {
+    height: 36px;
 }
 
 /* Compact submit arrow button - RECTANGLE not circle */
@@ -626,20 +632,18 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     transform: none;
 }
 
-/* Comment input for new top-level comments (slim) */
+/* Comment input for new top-level comments (slim, no wrapper styling) */
 .futuristic-comment-input {
-    background: rgba(30, 41, 59, 0.5);
-    backdrop-filter: blur(8px);
-    border-radius: 14px;
-    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    padding: 0;
     margin-bottom: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .comment-input-row {
     display: flex;
     gap: 8px;
-    align-items: center;
+    align-items: stretch;
 }
 
 .futuristic-comment-input textarea {
@@ -652,7 +656,8 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     font-size: 13px;
     font-family: inherit;
     resize: none;
-    min-height: 40px;
+    height: 42px;
+    min-height: 42px;
     max-height: 100px;
     transition: border-color 0.2s ease;
 }
@@ -664,7 +669,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .futuristic-comment-input .submit-arrow {
-    height: 40px;
+    height: 42px;
     background: linear-gradient(135deg, var(--neon-purple), var(--neon-pink));
 }
 

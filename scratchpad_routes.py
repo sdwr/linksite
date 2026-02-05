@@ -255,10 +255,12 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .futuristic-card-wrapper {
     position: relative;
     margin-bottom: 20px;
+    transition: margin-bottom 0.3s ease;
 }
 
 .futuristic-card {
     position: relative;
+    z-index: 2;
     background: radial-gradient(ellipse at center, rgba(10, 15, 30, 0.95) 0%, rgba(15, 23, 42, 0.85) 70%);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -399,12 +401,12 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     text-shadow: 0 0 8px rgba(5, 217, 232, 0.8);
 }
 
-/* Reply handle (juts below card) */
+/* Reply handle (juts below card - UNDER the card z-index) */
 .reply-handle {
     position: relative;
     width: 70%;
-    margin: -8px auto 0;
-    padding: 6px 16px;
+    margin: -12px auto 0;
+    padding: 14px 16px 6px;
     background: rgba(20, 30, 50, 0.9);
     border: 1px solid var(--handle-color, #64748b);
     border-top: none;
@@ -414,20 +416,18 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     font-size: 12px;
     color: #94a3b8;
     transition: all 0.25s ease;
-    z-index: 1;
+    z-index: 0;
 }
 
 .reply-handle:hover {
     background: rgba(30, 45, 70, 0.95);
     color: #e2e8f0;
     box-shadow: 0 4px 20px var(--handle-color, #64748b)40, 0 0 30px var(--handle-color, #64748b)20;
-    transform: translateY(2px);
 }
 
-.reply-handle.active {
-    background: var(--handle-color, #64748b)20;
-    color: #fff;
-    box-shadow: 0 4px 25px var(--handle-color, #64748b)50;
+.reply-handle.active,
+.reply-handle.hidden {
+    display: none;
 }
 
 .reply-handle-text {
@@ -438,11 +438,11 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .replies-container {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.4s ease-out, margin-top 0.4s ease-out, opacity 0.3s ease;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), margin-top 0.3s ease, opacity 0.25s ease;
     opacity: 0;
-    margin-left: 20px;
-    padding-left: 12px;
-    border-left: 2px solid rgba(100, 116, 139, 0.3);
+    margin-left: 0;
+    padding-left: 0;
+    position: relative;
 }
 
 .replies-container.expanded {
@@ -451,39 +451,54 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     opacity: 1;
 }
 
-.close-replies {
-    display: none;
-    text-align: center;
-    padding: 8px;
-    margin-top: 8px;
-    color: #64748b;
-    font-size: 12px;
+/* Clickable thread line on left side */
+.replies-thread-line {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
     cursor: pointer;
-    border-radius: 8px;
+    z-index: 10;
+}
+
+.replies-thread-line::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: rgba(100, 116, 139, 0.4);
+    border-radius: 2px;
     transition: all 0.2s ease;
 }
 
-.close-replies:hover {
-    background: rgba(239, 68, 68, 0.1);
-    color: #f87171;
+.replies-thread-line:hover::before {
+    background: var(--neon-cyan);
+    box-shadow: 0 0 8px var(--neon-cyan), 0 0 16px rgba(5, 217, 232, 0.3);
 }
 
-.replies-container.expanded .close-replies {
-    display: block;
+.replies-inner {
+    margin-left: 24px;
 }
 
+/* Reply card - styled like main comments */
 .reply-card {
-    padding: 10px 12px;
-    background: rgba(20, 30, 50, 0.8);
-    border-radius: 10px;
-    border-left: 2px solid;
-    margin-bottom: 8px;
-    transition: all 0.2s ease;
+    position: relative;
+    background: radial-gradient(ellipse at center, rgba(10, 15, 30, 0.9) 0%, rgba(15, 23, 42, 0.8) 70%);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 12px;
+    padding: 12px 14px;
+    border: 1px solid;
+    margin-bottom: 10px;
+    transition: transform 0.15s ease, filter 0.15s ease;
 }
 
 .reply-card:hover {
-    transform: translateX(3px);
-    filter: brightness(1.08);
+    transform: scale(1.01);
+    filter: brightness(1.06);
 }
 
 .reply-card:last-of-type {
@@ -491,48 +506,104 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .reply-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 4px;
 }
 
-.reply-card .card-body {
+.reply-card .user-id {
+    font-weight: 600;
     font-size: 12px;
-    line-height: 1.4;
+}
+
+.reply-card .timestamp {
+    color: #64748b;
+    font-size: 11px;
+}
+
+.reply-card .card-body {
+    color: #cbd5e1;
+    font-size: 13px;
+    line-height: 1.45;
     margin-bottom: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
-.reply-input {
-    margin-top: 10px;
+.reply-card .card-actions {
     display: flex;
-    gap: 8px;
-    align-items: flex-end;
+    justify-content: space-between;
+    align-items: center;
 }
 
-.reply-input textarea {
+.reply-card .upvote-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 4px 10px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.reply-card .upvote-btn:hover {
+    background: rgba(57, 255, 20, 0.1);
+    color: var(--neon-green);
+    border-color: rgba(57, 255, 20, 0.5);
+}
+
+.reply-card .upvote-btn.active {
+    background: rgba(57, 255, 20, 0.2);
+    border-color: var(--neon-green);
+    color: var(--neon-green);
+    box-shadow: 0 0 12px rgba(57, 255, 20, 0.4);
+}
+
+/* Inline reply input (inside comment card) */
+.inline-reply-input {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: none;
+    gap: 8px;
+    align-items: center;
+}
+
+.inline-reply-input.show {
+    display: flex;
+}
+
+.inline-reply-input textarea {
     flex: 1;
     padding: 8px 12px;
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     color: #e2e8f0;
-    font-size: 12px;
+    font-size: 13px;
     font-family: inherit;
     resize: none;
-    min-height: 32px;
+    min-height: 36px;
 }
 
-.reply-input textarea:focus {
+.inline-reply-input textarea:focus {
     outline: none;
     border-color: var(--neon-cyan);
+    box-shadow: 0 0 8px rgba(5, 217, 232, 0.15);
 }
 
-/* Compact submit arrow button */
+/* Compact submit arrow button - RECTANGLE not circle */
 .submit-arrow {
-    width: 32px;
-    height: 32px;
-    padding: 0;
+    height: 36px;
+    padding: 0 14px;
     background: linear-gradient(135deg, var(--neon-cyan), var(--neon-blue));
     border: none;
-    border-radius: 50%;
+    border-radius: 8px;
     color: #0f172a;
     font-size: 16px;
     font-weight: 700;
@@ -545,7 +616,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .submit-arrow:hover {
-    transform: scale(1.1);
+    transform: scale(1.05);
     box-shadow: 0 0 16px rgba(5, 217, 232, 0.5);
 }
 
@@ -568,12 +639,12 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .comment-input-row {
     display: flex;
     gap: 8px;
-    align-items: flex-end;
+    align-items: center;
 }
 
 .futuristic-comment-input textarea {
     flex: 1;
-    padding: 8px 12px;
+    padding: 10px 14px;
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
@@ -581,19 +652,19 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     font-size: 13px;
     font-family: inherit;
     resize: none;
-    min-height: 36px;
+    min-height: 40px;
     max-height: 100px;
-    transition: border-color 0.2s ease, min-height 0.2s ease;
+    transition: border-color 0.2s ease;
 }
 
 .futuristic-comment-input textarea:focus {
     outline: none;
     border-color: var(--neon-cyan);
     box-shadow: 0 0 10px rgba(5, 217, 232, 0.15);
-    min-height: 60px;
 }
 
 .futuristic-comment-input .submit-arrow {
+    height: 40px;
     background: linear-gradient(135deg, var(--neon-purple), var(--neon-pink));
 }
 
@@ -1511,7 +1582,7 @@ function _renderCommentCard(c, index) {
     var replyCount = hasReplies ? c.replies.length : 0;
     
     var html = '<div class="futuristic-card-wrapper">';
-    html += '<div class="futuristic-card fade-in" data-comment-id="' + c.id + '" style="' + _borderStyle(color) + 'animation-delay:' + (index * 0.05) + 's">';
+    html += '<div class="futuristic-card fade-in" data-comment-id="' + c.id + '" style="' + _borderStyle(color) + 'animation-delay:' + (index * 0.05) + 's; position:relative; z-index:1;">';
     html += '<div class="card-glow" style="' + _glowStyle(color) + '"></div>';
     html += '<div class="card-header">';
     html += '<span class="user-id" style="color:' + color + '">@' + _esc(c.display_name || 'Anonymous') + '</span>';
@@ -1522,20 +1593,32 @@ function _renderCommentCard(c, index) {
     html += '<div class="card-actions-left">';
     html += '<button class="upvote-btn" onclick="_upvoteComment(' + c.id + ', this)" data-upvotes="' + (c.upvotes||0) + '">&#9650; ' + (c.upvotes || 0) + '</button>';
     html += '</div>';
+    html += '<div class="card-actions-right">';
+    html += '<button class="action-btn reply-btn" onclick="_toggleInlineReply(' + c.id + ', this)" data-comment-id="' + c.id + '">&#128172; Reply</button>';
+    html += '</div>';
+    html += '</div>';
+    // Inline reply input (inside the card)
+    html += '<div class="inline-reply-input" id="inline-reply-' + c.id + '">';
+    html += '<textarea id="reply-text-' + c.id + '" placeholder="Write a reply..." rows="1"></textarea>';
+    html += '<button onclick="_submitReply(' + c.id + ')" class="submit-arrow" title="Send">&#8594;</button>';
     html += '</div>';
     html += '</div>';
     
-    // Reply handle (juts below the card)
-    html += '<div class="reply-handle" onclick="_toggleReplies(' + c.id + ', this)" data-comment-id="' + c.id + '" style="--handle-color:' + color + '">';
-    html += '<span class="reply-handle-text">' + (replyCount > 0 ? '&#128172; ' + replyCount + ' repl' + (replyCount === 1 ? 'y' : 'ies') : '&#128172; Reply') + '</span>';
-    html += '</div>';
+    // Reply handle (only show if has replies, peek from behind card)
+    if (hasReplies) {
+        html += '<div class="reply-handle" onclick="_toggleReplies(' + c.id + ')" data-comment-id="' + c.id + '" id="handle-' + c.id + '" style="--handle-color:' + color + '">';
+        html += '<span class="reply-handle-text">&#128172; ' + replyCount + ' repl' + (replyCount === 1 ? 'y' : 'ies') + '</span>';
+        html += '</div>';
+    }
     
-    // Replies container
-    html += '<div class="replies-container" id="replies-' + c.id + '">';
+    // Replies container (with clickable thread line)
+    html += '<div class="replies-container" id="replies-' + c.id + '" style="--card-color:' + color + '">';
+    html += '<div class="replies-thread-line" onclick="_toggleReplies(' + c.id + ')" title="Click to collapse"></div>';
+    html += '<div class="replies-inner">';
     if (hasReplies) {
         c.replies.forEach(function(r) {
             var rColor = _hashColor(r.display_name || 'anon');
-            html += '<div class="reply-card" style="border-left-color:' + rColor + '">';
+            html += '<div class="reply-card" style="border-color:' + rColor + '50; --card-color:' + rColor + '">';
             html += '<div class="card-header">';
             html += '<span class="user-id" style="color:' + rColor + '">@' + _esc(r.display_name || 'Anonymous') + '</span>';
             html += '<span class="timestamp">' + _ago(r.created_at) + '</span>';
@@ -1547,16 +1630,10 @@ function _renderCommentCard(c, index) {
             html += '</div>';
         });
     }
-    // Reply input (compact)
-    html += '<div class="reply-input">';
-    html += '<textarea id="reply-text-' + c.id + '" placeholder="Write a reply..." rows="1"></textarea>';
-    html += '<button onclick="_submitReply(' + c.id + ')" class="submit-arrow" title="Send">&#8594;</button>';
-    html += '</div>';
-    // Close handle when expanded
-    html += '<div class="close-replies" onclick="_toggleReplies(' + c.id + ', document.querySelector(\'[data-comment-id=\\\''+c.id+'\\\']\'))">&#10005; Close</div>';
-    html += '</div>';
+    html += '</div>'; // .replies-inner
+    html += '</div>'; // .replies-container
     
-    html += '</div>';
+    html += '</div>'; // .futuristic-card-wrapper
     return html;
 }
 
@@ -1582,17 +1659,47 @@ function _loadFuturisticComments() {
     });
 }
 
+// Toggle inline reply input visibility
+function _toggleInlineReply(commentId, btn) {
+    var input = document.getElementById('inline-reply-' + commentId);
+    if (!input) return;
+    
+    var isShowing = input.classList.contains('show');
+    
+    // Close all other inline replies first
+    document.querySelectorAll('.inline-reply-input.show').forEach(function(el) {
+        el.classList.remove('show');
+    });
+    document.querySelectorAll('.reply-btn.active').forEach(function(el) {
+        el.classList.remove('active');
+    });
+    
+    if (!isShowing) {
+        input.classList.add('show');
+        if (btn) btn.classList.add('active');
+        // Focus the textarea
+        var textarea = document.getElementById('reply-text-' + commentId);
+        if (textarea) textarea.focus();
+    }
+}
+
 // Toggle replies visibility
-function _toggleReplies(commentId, btn) {
+function _toggleReplies(commentId) {
     var container = document.getElementById('replies-' + commentId);
     if (!container) return;
     
-    var handle = document.querySelector('.reply-handle[data-comment-id="' + commentId + '"]');
+    var handle = document.getElementById('handle-' + commentId);
     var isExpanded = container.classList.contains('expanded');
     
-    container.classList.toggle('expanded');
-    if (handle) handle.classList.toggle('active');
-    if (btn) btn.classList.toggle('active');
+    if (isExpanded) {
+        // Closing - show handle again
+        container.classList.remove('expanded');
+        if (handle) handle.classList.remove('hidden');
+    } else {
+        // Opening - hide handle
+        container.classList.add('expanded');
+        if (handle) handle.classList.add('hidden');
+    }
 }
 
 // Upvote a comment (optimistic UI)
@@ -1672,6 +1779,12 @@ function _submitReply(parentId) {
         alert('Please wait - loading user info...');
         return;
     }
+    
+    // Hide the inline reply immediately for responsiveness
+    var inlineInput = document.getElementById('inline-reply-' + parentId);
+    if (inlineInput) inlineInput.classList.remove('show');
+    var replyBtn = document.querySelector('.reply-btn[data-comment-id="' + parentId + '"]');
+    if (replyBtn) replyBtn.classList.remove('active');
     
     fetch('/api/link/' + LID + '/comments', {
         method: 'POST',

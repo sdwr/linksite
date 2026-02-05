@@ -647,15 +647,16 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .inline-reply-input textarea {
     flex: 1;
     min-width: 100px;
-    padding: 6px 10px;
+    padding: 4px 10px;
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     color: #e2e8f0;
-    font-size: 13px;
+    font-size: 12px;
     font-family: inherit;
     resize: none;
-    height: 32px;
+    height: 28px;
+    line-height: 1.4;
     min-height: 36px;
 }
 
@@ -666,9 +667,9 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .inline-reply-input .submit-arrow {
-    height: 32px;
+    height: 28px;
     padding: 0 10px;
-    font-size: 14px;
+    font-size: 13px;
     flex-shrink: 0;
 }
 

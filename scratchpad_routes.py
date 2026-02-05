@@ -262,33 +262,35 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 
 .futuristic-card {
     position: relative;
-    background: rgba(15, 23, 42, 0.8);
+    background: radial-gradient(ellipse at center, rgba(10, 15, 30, 0.95) 0%, rgba(15, 23, 42, 0.8) 70%);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-radius: 24px;
     padding: 20px;
     margin-bottom: 16px;
-    border: 1px solid transparent;
-    transition: all 0.3s ease;
+    border: 2px solid;
+    transition: all 0.3s ease, box-shadow 0.3s ease;
     overflow: hidden;
 }
 
 .futuristic-card:hover {
-    transform: translateY(-5px);
+    transform: translateY(-5px) scale(1.01);
+    filter: brightness(1.1);
 }
 
 .futuristic-card .card-glow {
     position: absolute;
-    inset: 0;
-    border-radius: 24px;
+    inset: -2px;
+    border-radius: 26px;
     pointer-events: none;
-    opacity: 0.6;
-    animation: pulse-glow 3s ease-in-out infinite;
+    opacity: 0.8;
+    animation: pulse-glow 2.5s ease-in-out infinite;
+    filter: blur(8px);
 }
 
 @keyframes pulse-glow {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 0.7; }
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.02); }
 }
 
 @keyframes fadeInUp {
@@ -360,28 +362,40 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .futuristic-card .upvote-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #e2e8f0;
+    background: rgba(57, 255, 20, 0.1);
+    color: var(--neon-green);
+    border-color: rgba(57, 255, 20, 0.5);
+    box-shadow: 0 0 15px rgba(57, 255, 20, 0.2);
 }
 
 .futuristic-card .upvote-btn.active {
-    background: rgba(57, 255, 20, 0.15);
+    background: rgba(57, 255, 20, 0.2);
     border-color: var(--neon-green);
     color: var(--neon-green);
-    box-shadow: 0 0 12px rgba(57, 255, 20, 0.3);
+    box-shadow: 0 0 20px rgba(57, 255, 20, 0.5), 0 0 40px rgba(57, 255, 20, 0.2), inset 0 0 10px rgba(57, 255, 20, 0.1);
+    text-shadow: 0 0 8px rgba(57, 255, 20, 0.8);
+    animation: button-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes button-pulse {
+    0%, 100% { box-shadow: 0 0 20px rgba(57, 255, 20, 0.5), 0 0 40px rgba(57, 255, 20, 0.2); }
+    50% { box-shadow: 0 0 30px rgba(57, 255, 20, 0.7), 0 0 60px rgba(57, 255, 20, 0.3); }
 }
 
 .futuristic-card .action-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #e2e8f0;
+    background: rgba(5, 217, 232, 0.1);
+    color: var(--neon-cyan);
+    border-color: rgba(5, 217, 232, 0.5);
+    box-shadow: 0 0 15px rgba(5, 217, 232, 0.2);
 }
 
 /* Reply button active state */
 .futuristic-card .reply-btn.active {
-    background: rgba(5, 217, 232, 0.15);
+    background: rgba(5, 217, 232, 0.2);
     border-color: var(--neon-cyan);
     color: var(--neon-cyan);
-    box-shadow: 0 0 12px rgba(5, 217, 232, 0.3);
+    box-shadow: 0 0 20px rgba(5, 217, 232, 0.5), 0 0 40px rgba(5, 217, 232, 0.2);
+    text-shadow: 0 0 8px rgba(5, 217, 232, 0.8);
 }
 
 /* Replies container */
@@ -399,10 +413,16 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .futuristic-card .reply-card {
     margin-left: 24px;
     padding: 14px;
-    background: rgba(30, 41, 59, 0.6);
+    background: radial-gradient(ellipse at center, rgba(20, 30, 50, 0.9) 0%, rgba(30, 41, 59, 0.6) 100%);
     border-radius: 16px;
-    border-left: 2px solid;
+    border-left: 3px solid;
     margin-bottom: 10px;
+    transition: all 0.3s ease;
+}
+
+.futuristic-card .reply-card:hover {
+    transform: translateX(4px);
+    filter: brightness(1.1);
 }
 
 .futuristic-card .reply-card:last-child {
@@ -511,7 +531,8 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 
 .futuristic-comment-input button:hover {
     transform: scale(1.05);
-    box-shadow: 0 0 20px rgba(188, 19, 254, 0.4);
+    box-shadow: 0 0 25px rgba(188, 19, 254, 0.5), 0 0 50px rgba(255, 0, 110, 0.3);
+    filter: brightness(1.15);
 }
 
 .futuristic-comment-input button:disabled {
@@ -1448,15 +1469,16 @@ function _hashColor(str) {
     return NEON_COLORS[Math.abs(hash) % NEON_COLORS.length];
 }
 
-// Build gradient glow style for a card
+// Build gradient glow style for a card (inner glow effect)
 function _glowStyle(color) {
-    return 'background: radial-gradient(ellipse at center, transparent 30%, ' + color + '20 100%); ' +
-           'box-shadow: inset 0 0 30px ' + color + '10;';
+    return 'background: radial-gradient(ellipse at center, transparent 20%, ' + color + '15 60%, ' + color + '30 100%); ' +
+           'box-shadow: inset 0 0 50px ' + color + '20;';
 }
 
-// Build border style
+// Build border style with intense outer glow
 function _borderStyle(color) {
-    return 'border-color: ' + color + '; box-shadow: 0 0 20px ' + color + '30;';
+    return 'border-color: ' + color + '; ' +
+           'box-shadow: 0 0 15px ' + color + '40, 0 0 30px ' + color + '25, 0 0 45px ' + color + '15, inset 0 0 20px ' + color + '10;';
 }
 
 // Render a single comment card

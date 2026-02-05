@@ -434,22 +434,25 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     display: inline-block;
 }
 
-/* Replies container */
+/* Replies container - INSTANT collapse, smooth open */
 .replies-container {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.35s ease-out, margin-top 0.25s ease-out, opacity 0.2s ease-out;
     opacity: 0;
     margin-left: 0;
+    margin-top: 0;
     padding-left: 0;
     position: relative;
+    /* NO transition on close - instant collapse */
+    transition: none;
 }
 
 .replies-container.expanded {
     max-height: 2000px;
     margin-top: 12px;
     opacity: 1;
-    transition: max-height 0.4s ease-in, margin-top 0.3s ease, opacity 0.25s ease;
+    /* Smooth transition only on OPEN */
+    transition: max-height 0.3s ease-out, margin-top 0.2s ease, opacity 0.15s ease;
 }
 
 /* Clickable thread line on left side */
@@ -563,6 +566,69 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     border-color: var(--neon-green);
     color: var(--neon-green);
     box-shadow: 0 0 12px rgba(57, 255, 20, 0.4);
+}
+
+/* Reply button in reply cards (same style as main cards) */
+.reply-card .action-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 4px 10px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.reply-card .action-btn:hover {
+    background: rgba(5, 217, 232, 0.1);
+    color: var(--neon-cyan);
+    border-color: rgba(5, 217, 232, 0.5);
+    box-shadow: 0 0 12px rgba(5, 217, 232, 0.2);
+}
+
+.reply-card .reply-btn.active {
+    background: rgba(5, 217, 232, 0.2);
+    border-color: var(--neon-cyan);
+    color: var(--neon-cyan);
+    box-shadow: 0 0 12px rgba(5, 217, 232, 0.4);
+}
+
+/* Inline reply input in reply cards */
+.reply-card .inline-reply-input {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: none;
+    gap: 6px;
+    align-items: stretch;
+}
+
+.reply-card .inline-reply-input.show {
+    display: flex;
+}
+
+.reply-card .inline-reply-input textarea {
+    flex: 1;
+    padding: 6px 10px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-family: inherit;
+    resize: none;
+    height: 32px;
+    min-height: 32px;
+}
+
+.reply-card .inline-reply-input .submit-arrow {
+    height: 32px;
+    padding: 0 12px;
+    font-size: 14px;
 }
 
 /* Inline reply input (inside comment card) */
@@ -1645,7 +1711,7 @@ function _renderCommentCard(c, index) {
             if (isLast) {
                 html += '<div class="inline-reply-input" id="inline-reply-reply-' + c.id + '">';
                 html += '<textarea id="reply-text-reply-' + c.id + '" placeholder="Continue the thread..." rows="1"></textarea>';
-                html += '<button onclick="_submitReply(' + c.id + ')" class="submit-arrow" title="Send">&#8594;</button>';
+                html += '<button onclick="_submitReply(' + c.id + ', \'reply-text-reply-' + c.id + '\')" class="submit-arrow" title="Send">&#8594;</button>';
                 html += '</div>';
             }
             html += '</div>';
@@ -1791,8 +1857,25 @@ function _submitNewComment() {
 }
 
 // Submit a reply to a comment
-function _submitReply(parentId) {
-    var textEl = document.getElementById('reply-text-' + parentId);
+// textareaId is optional - if provided, use it directly; otherwise derive from parentId
+function _submitReply(parentId, textareaId) {
+    // Try to find the textarea - check multiple possible IDs
+    var textEl = null;
+    if (textareaId) {
+        textEl = document.getElementById(textareaId);
+    }
+    if (!textEl) {
+        textEl = document.getElementById('reply-text-' + parentId);
+    }
+    if (!textEl) {
+        textEl = document.getElementById('reply-text-reply-' + parentId);
+    }
+    
+    if (!textEl) {
+        console.error('Could not find reply textarea for parent:', parentId);
+        return;
+    }
+    
     var content = (textEl.value || '').trim();
     
     if (!content) return;
@@ -1802,10 +1885,13 @@ function _submitReply(parentId) {
     }
     
     // Hide the inline reply immediately for responsiveness
-    var inlineInput = document.getElementById('inline-reply-' + parentId);
-    if (inlineInput) inlineInput.classList.remove('show');
-    var replyBtn = document.querySelector('.reply-btn[data-comment-id="' + parentId + '"]');
-    if (replyBtn) replyBtn.classList.remove('active');
+    // Close all open inline replies
+    document.querySelectorAll('.inline-reply-input.show').forEach(function(el) {
+        el.classList.remove('show');
+    });
+    document.querySelectorAll('.reply-btn.active').forEach(function(el) {
+        el.classList.remove('active');
+    });
     
     fetch('/api/link/' + LID + '/comments', {
         method: 'POST',

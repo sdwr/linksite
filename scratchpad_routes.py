@@ -434,7 +434,7 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     display: inline-block;
 }
 
-/* Replies container - instant fade, quick slide up */
+/* Replies container - instant fade, smooth slide up */
 .replies-container {
     max-height: 0;
     overflow: hidden;
@@ -443,8 +443,8 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
     margin-top: 0;
     padding-left: 0;
     position: relative;
-    /* On CLOSE: very fast (content disappears, height collapses quickly) */
-    transition: max-height 0.15s ease-out, margin-top 0.1s ease-out, opacity 0s;
+    /* On CLOSE: instant margin, smooth height */
+    transition: max-height 0.3s ease-out, margin-top 0s, opacity 0s;
 }
 
 .replies-container.expanded {
@@ -599,14 +599,13 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 
 /* Inline reply input in reply cards */
 .reply-card .inline-reply-input {
-    max-width: 0;
-    overflow: hidden;
     opacity: 0;
+    visibility: hidden;
 }
 
 .reply-card .inline-reply-input.show {
-    max-width: 200px;
     opacity: 1;
+    visibility: visible;
 }
 
 .reply-card .inline-reply-input textarea {
@@ -632,32 +631,31 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 /* Inline reply input (inside card-actions, between vote and reply) */
 .inline-reply-input {
     display: flex;
-    gap: 4px;
+    gap: 6px;
     align-items: center;
     flex: 1;
-    max-width: 0;
-    overflow: hidden;
     opacity: 0;
-    transition: max-width 0.2s ease, opacity 0.15s ease;
+    visibility: hidden;
+    transition: opacity 0.15s ease;
 }
 
 .inline-reply-input.show {
-    max-width: 300px;
     opacity: 1;
+    visibility: visible;
 }
 
 .inline-reply-input textarea {
     flex: 1;
-    min-width: 0;
-    padding: 4px 8px;
+    min-width: 100px;
+    padding: 6px 10px;
     background: rgba(15, 23, 42, 0.8);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
+    border-radius: 8px;
     color: #e2e8f0;
-    font-size: 12px;
+    font-size: 13px;
     font-family: inherit;
     resize: none;
-    height: 28px;
+    height: 32px;
     min-height: 36px;
 }
 
@@ -668,9 +666,10 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 }
 
 .inline-reply-input .submit-arrow {
-    height: 28px;
-    padding: 0 8px;
-    font-size: 12px;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 14px;
+    flex-shrink: 0;
 }
 
 /* Compact submit arrow button - RECTANGLE not circle */
@@ -1691,7 +1690,7 @@ function _renderCommentCard(c, index) {
     html += '<button onclick="_submitReply(' + c.id + ')" class="submit-arrow" title="Send">&#8594;</button>';
     html += '</div>';
     html += '<div class="card-actions-right">';
-    html += '<button class="action-btn reply-btn" onclick="_toggleInlineReply(' + c.id + ', this)" data-comment-id="' + c.id + '">&#128172;</button>';
+    html += '<button class="action-btn reply-btn" onclick="_toggleInlineReply(' + c.id + ', this)" data-comment-id="' + c.id + '">&#128172; Reply</button>';
     html += '</div>';
     html += '</div>';
     html += '</div>';
@@ -1728,7 +1727,7 @@ function _renderCommentCard(c, index) {
                 html += '<button onclick="_submitReply(' + c.id + ', \'reply-text-reply-' + c.id + '\')" class="submit-arrow" title="Send">&#8594;</button>';
                 html += '</div>';
                 html += '<div class="card-actions-right">';
-                html += '<button class="action-btn reply-btn" onclick="_toggleInlineReply(\'reply-' + c.id + '\', this)" data-comment-id="reply-' + c.id + '">&#128172;</button>';
+                html += '<button class="action-btn reply-btn" onclick="_toggleInlineReply(\'reply-' + c.id + '\', this)" data-comment-id="reply-' + c.id + '">&#128172; Reply</button>';
                 html += '</div>';
             }
             html += '</div>';

@@ -238,6 +238,302 @@ h2 { font-size: 18px; margin-bottom: 12px; color: #e2e8f0; }
 .comment-meta strong { color: #94a3b8; font-weight: 600; }
 .comment-text { font-size: 14px; color: #cbd5e1; white-space: pre-wrap; word-break: break-word; }
 
+/* ========== Futuristic Comment Cards ========== */
+:root {
+    --neon-purple: #bc13fe;
+    --neon-cyan: #05d9e8;
+    --neon-green: #39ff14;
+    --neon-pink: #ff006e;
+    --neon-orange: #ff9500;
+    --neon-blue: #00d4ff;
+}
+
+.futuristic-comments {
+    margin-top: 24px;
+}
+
+.futuristic-comments h2 {
+    font-size: 18px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.futuristic-card {
+    position: relative;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 24px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid transparent;
+    transition: all 0.3s ease;
+    overflow: hidden;
+}
+
+.futuristic-card:hover {
+    transform: translateY(-5px);
+}
+
+.futuristic-card .card-glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    pointer-events: none;
+    opacity: 0.6;
+    animation: pulse-glow 3s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.futuristic-card.fade-in {
+    animation: fadeInUp 0.4s ease forwards;
+}
+
+.futuristic-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.futuristic-card .user-id {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.futuristic-card .timestamp {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.futuristic-card .card-body {
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.futuristic-card .card-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.futuristic-card .card-actions-left,
+.futuristic-card .card-actions-right {
+    display: flex;
+    gap: 8px;
+}
+
+.futuristic-card .upvote-btn,
+.futuristic-card .action-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 6px 12px;
+    color: #94a3b8;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.futuristic-card .upvote-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+}
+
+.futuristic-card .upvote-btn.active {
+    background: rgba(57, 255, 20, 0.15);
+    border-color: var(--neon-green);
+    color: var(--neon-green);
+    box-shadow: 0 0 12px rgba(57, 255, 20, 0.3);
+}
+
+.futuristic-card .action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+}
+
+/* Reply button active state */
+.futuristic-card .reply-btn.active {
+    background: rgba(5, 217, 232, 0.15);
+    border-color: var(--neon-cyan);
+    color: var(--neon-cyan);
+    box-shadow: 0 0 12px rgba(5, 217, 232, 0.3);
+}
+
+/* Replies container */
+.futuristic-card .replies-container {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease, margin-top 0.3s ease;
+}
+
+.futuristic-card .replies-container.expanded {
+    max-height: 2000px;
+    margin-top: 16px;
+}
+
+.futuristic-card .reply-card {
+    margin-left: 24px;
+    padding: 14px;
+    background: rgba(30, 41, 59, 0.6);
+    border-radius: 16px;
+    border-left: 2px solid;
+    margin-bottom: 10px;
+}
+
+.futuristic-card .reply-card:last-child {
+    margin-bottom: 0;
+}
+
+.futuristic-card .reply-input {
+    margin-left: 24px;
+    margin-top: 12px;
+    display: flex;
+    gap: 10px;
+}
+
+.futuristic-card .reply-input textarea {
+    flex: 1;
+    padding: 10px 14px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+    min-height: 40px;
+}
+
+.futuristic-card .reply-input textarea:focus {
+    outline: none;
+    border-color: var(--neon-cyan);
+}
+
+.futuristic-card .reply-input button {
+    padding: 10px 16px;
+    background: linear-gradient(135deg, var(--neon-cyan), var(--neon-blue));
+    border: none;
+    border-radius: 12px;
+    color: #0f172a;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.futuristic-card .reply-input button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 16px rgba(5, 217, 232, 0.4);
+}
+
+/* Comment input for new top-level comments */
+.futuristic-comment-input {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(12px);
+    border-radius: 20px;
+    padding: 16px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.futuristic-comment-input textarea {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    color: #e2e8f0;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 60px;
+    margin-bottom: 12px;
+    transition: border-color 0.3s ease;
+}
+
+.futuristic-comment-input textarea:focus {
+    outline: none;
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 12px rgba(5, 217, 232, 0.2);
+}
+
+.futuristic-comment-input .input-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.futuristic-comment-input .commenting-as {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.futuristic-comment-input .commenting-as strong {
+    color: var(--neon-cyan);
+}
+
+.futuristic-comment-input button {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, var(--neon-purple), var(--neon-pink));
+    border: none;
+    border-radius: 14px;
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.futuristic-comment-input button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 20px rgba(188, 19, 254, 0.4);
+}
+
+.futuristic-comment-input button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Empty state */
+.futuristic-comments .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.futuristic-comments .empty-state .icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+    opacity: 0.6;
+}
+
 /* Related links */
 .related-link {
     display: block; padding: 8px 12px;
@@ -1026,17 +1322,32 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             p = link['parent']
             parent_html = f'<div style="margin-bottom:12px"><span style="color:#64748b;font-size:13px">Part of:</span> <a href="/link/{p["id"]}">{_esc(p.get("title") or p.get("url"))}</a></div>'
 
-        # --- Comments section: just the input form + a placeholder for lazy-loaded notes ---
+        # --- Old notes section: just the input form + a placeholder for lazy-loaded notes ---
         comments_shell = f'''<div class="commenting-as" id="commenting-as"></div>
         <div class="comment-input">
             <form method="POST" action="/link/{link_id}/add-note" style="display:flex;gap:10px;width:100%">
-                <textarea name="text" placeholder="Add a comment..." required rows="1"
+                <textarea name="text" placeholder="Add a note..." required rows="1"
                     onfocus="this.rows=3" onblur="if(!this.value)this.rows=1"
                     onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){{event.preventDefault();this.form.submit()}}"></textarea>
                 <input type="hidden" name="author" value="anon" id="comment-author">
             </form>
         </div>
-        <div id="notes-container"><div class="lazy-loader">Loading comments&hellip;</div></div>'''
+        <div id="notes-container"><div class="lazy-loader">Loading notes&hellip;</div></div>'''
+
+        # --- Futuristic Comments Section ---
+        futuristic_comments_shell = '''<div class="futuristic-comments">
+            <h2>&#128172; Comments</h2>
+            <div class="futuristic-comment-input" id="new-comment-form">
+                <textarea id="new-comment-text" placeholder="Share your thoughts..." rows="2"></textarea>
+                <div class="input-footer">
+                    <span class="commenting-as" id="futuristic-commenting-as">Commenting as <strong>Anonymous</strong></span>
+                    <button onclick="_submitNewComment()" id="submit-comment-btn">Post Comment</button>
+                </div>
+            </div>
+            <div id="futuristic-comments-container">
+                <div class="lazy-loader">Loading comments&hellip;</div>
+            </div>
+        </div>'''
 
         # --- External discussions: shell with refresh button + placeholder ---
         ext_disc_shell = f'''<div class="card">
@@ -1088,6 +1399,10 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             {comments_shell}
         </div>
 
+        <div class="card">
+            {futuristic_comments_shell}
+        </div>
+
         {ext_disc_shell}
 
         {related_shell}"""
@@ -1100,10 +1415,10 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             + "var PROCESSING_STATUS=" + _json.dumps(processing_status) + ";\n"
             + "var HAS_SUMMARY=" + _json.dumps(has_summary) + ";\n"
             + r"""
-// --- Load notes/comments ---
+// --- Load notes ---
 fetch('/api/link/'+LID+'/notes').then(function(r){return r.json();}).then(function(data){
     var c=document.getElementById('notes-container');var notes=data.notes||[];var h='';
-    if(!notes.length){h='<p style="color:#475569;font-size:13px;padding:8px 0">No comments yet. Start the discussion!</p>';}
+    if(!notes.length){h='<p style="color:#475569;font-size:13px;padding:8px 0">No notes yet.</p>';}
     else{notes.forEach(function(n){
         h+='<div class="comment"><div class="vote-col">'+
         '<button class="vote-btn up" title="Upvote">&#9650;</button>'+
@@ -1114,7 +1429,215 @@ fetch('/api/link/'+LID+'/notes').then(function(r){return r.json();}).then(functi
         '<div class="comment-text">'+_esc(n.text||'')+'</div></div></div>';
     });}
     c.innerHTML=h;
-}).catch(function(){document.getElementById('notes-container').innerHTML='<p style="color:#f87171;font-size:13px">Failed to load comments.</p>';});
+}).catch(function(){document.getElementById('notes-container').innerHTML='<p style="color:#f87171;font-size:13px">Failed to load notes.</p>';});
+
+// ============================================================
+// Futuristic Comments System
+// ============================================================
+
+var NEON_COLORS = ['#bc13fe', '#05d9e8', '#39ff14', '#ff006e', '#ff9500', '#00d4ff'];
+var _currentUserId = null;
+var _currentDisplayName = 'Anonymous';
+
+// Hash username to a consistent color
+function _hashColor(str) {
+    var hash = 0;
+    for (var i = 0; i < (str||'').length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return NEON_COLORS[Math.abs(hash) % NEON_COLORS.length];
+}
+
+// Build gradient glow style for a card
+function _glowStyle(color) {
+    return 'background: radial-gradient(ellipse at center, transparent 30%, ' + color + '20 100%); ' +
+           'box-shadow: inset 0 0 30px ' + color + '10;';
+}
+
+// Build border style
+function _borderStyle(color) {
+    return 'border-color: ' + color + '; box-shadow: 0 0 20px ' + color + '30;';
+}
+
+// Render a single comment card
+function _renderCommentCard(c, index) {
+    var color = _hashColor(c.display_name || 'anon');
+    var hasReplies = c.replies && c.replies.length > 0;
+    var replyCount = hasReplies ? c.replies.length : 0;
+    
+    var html = '<div class="futuristic-card fade-in" data-comment-id="' + c.id + '" style="' + _borderStyle(color) + 'animation-delay:' + (index * 0.1) + 's">';
+    html += '<div class="card-glow" style="' + _glowStyle(color) + '"></div>';
+    html += '<div class="card-header">';
+    html += '<span class="user-id" style="color:' + color + '">@' + _esc(c.display_name || 'Anonymous') + '</span>';
+    html += '<span class="timestamp">' + _ago(c.created_at) + '</span>';
+    html += '</div>';
+    html += '<div class="card-body">' + _esc(c.content || '') + '</div>';
+    html += '<div class="card-actions">';
+    html += '<div class="card-actions-left">';
+    html += '<button class="upvote-btn" onclick="_upvoteComment(' + c.id + ', this)" data-upvotes="' + (c.upvotes||0) + '">&#9650; ' + (c.upvotes || 0) + '</button>';
+    html += '</div>';
+    html += '<div class="card-actions-right">';
+    html += '<button class="action-btn reply-btn" onclick="_toggleReplies(' + c.id + ', this)">&#128172; ' + (replyCount > 0 ? replyCount : '') + '</button>';
+    html += '<button class="action-btn">&#8943;</button>';
+    html += '</div>';
+    html += '</div>';
+    
+    // Replies container
+    html += '<div class="replies-container" id="replies-' + c.id + '">';
+    if (hasReplies) {
+        c.replies.forEach(function(r) {
+            var rColor = _hashColor(r.display_name || 'anon');
+            html += '<div class="reply-card" style="border-left-color:' + rColor + '">';
+            html += '<div class="card-header">';
+            html += '<span class="user-id" style="color:' + rColor + '">@' + _esc(r.display_name || 'Anonymous') + '</span>';
+            html += '<span class="timestamp">' + _ago(r.created_at) + '</span>';
+            html += '</div>';
+            html += '<div class="card-body">' + _esc(r.content || '') + '</div>';
+            html += '<div class="card-actions"><div class="card-actions-left">';
+            html += '<button class="upvote-btn" onclick="_upvoteComment(' + r.id + ', this)" data-upvotes="' + (r.upvotes||0) + '">&#9650; ' + (r.upvotes || 0) + '</button>';
+            html += '</div></div>';
+            html += '</div>';
+        });
+    }
+    // Reply input
+    html += '<div class="reply-input">';
+    html += '<textarea id="reply-text-' + c.id + '" placeholder="Write a reply..." rows="1"></textarea>';
+    html += '<button onclick="_submitReply(' + c.id + ')">Reply</button>';
+    html += '</div>';
+    html += '</div>';
+    
+    html += '</div>';
+    return html;
+}
+
+// Load and render futuristic comments
+function _loadFuturisticComments() {
+    fetch('/api/link/' + LID + '/comments').then(function(r) { return r.json(); }).then(function(data) {
+        var container = document.getElementById('futuristic-comments-container');
+        var comments = data.comments || [];
+        
+        if (!comments.length) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#128172;</div><p>No comments yet. Be the first to share your thoughts!</p></div>';
+            return;
+        }
+        
+        var html = '';
+        comments.forEach(function(c, i) {
+            html += _renderCommentCard(c, i);
+        });
+        container.innerHTML = html;
+    }).catch(function(e) {
+        console.error('Failed to load comments:', e);
+        document.getElementById('futuristic-comments-container').innerHTML = '<p style="color:#f87171;font-size:13px">Failed to load comments.</p>';
+    });
+}
+
+// Toggle replies visibility
+function _toggleReplies(commentId, btn) {
+    var container = document.getElementById('replies-' + commentId);
+    if (!container) return;
+    
+    var isExpanded = container.classList.contains('expanded');
+    container.classList.toggle('expanded');
+    btn.classList.toggle('active');
+}
+
+// Upvote a comment
+function _upvoteComment(commentId, btn) {
+    btn.disabled = true;
+    fetch('/api/comment/' + commentId + '/upvote', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                btn.innerHTML = '&#9650; ' + data.upvotes;
+                btn.classList.add('active');
+                btn.style.animation = 'pulse-glow 0.5s ease';
+            }
+            btn.disabled = false;
+        })
+        .catch(function() { btn.disabled = false; });
+}
+
+// Submit a new top-level comment
+function _submitNewComment() {
+    var textEl = document.getElementById('new-comment-text');
+    var btn = document.getElementById('submit-comment-btn');
+    var content = (textEl.value || '').trim();
+    
+    if (!content) return;
+    if (!_currentUserId) {
+        alert('Please wait - loading user info...');
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = 'Posting...';
+    
+    fetch('/api/link/' + LID + '/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content, user_id: _currentUserId })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            textEl.value = '';
+            _loadFuturisticComments();
+        } else {
+            alert('Failed to post comment: ' + (data.detail || 'Unknown error'));
+        }
+        btn.disabled = false;
+        btn.textContent = 'Post Comment';
+    })
+    .catch(function(e) {
+        alert('Failed to post comment');
+        btn.disabled = false;
+        btn.textContent = 'Post Comment';
+    });
+}
+
+// Submit a reply to a comment
+function _submitReply(parentId) {
+    var textEl = document.getElementById('reply-text-' + parentId);
+    var content = (textEl.value || '').trim();
+    
+    if (!content) return;
+    if (!_currentUserId) {
+        alert('Please wait - loading user info...');
+        return;
+    }
+    
+    fetch('/api/link/' + LID + '/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: content, user_id: _currentUserId, parent_id: parentId })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            textEl.value = '';
+            _loadFuturisticComments();
+        } else {
+            alert('Failed to post reply: ' + (data.detail || 'Unknown error'));
+        }
+    })
+    .catch(function() { alert('Failed to post reply'); });
+}
+
+// Load user info and comments
+fetch('/api/me').then(function(r) { return r.json(); }).then(function(data) {
+    _currentUserId = data.user_id;
+    _currentDisplayName = data.display_name || 'Anonymous';
+    
+    var caEl = document.getElementById('futuristic-commenting-as');
+    if (caEl) {
+        var color = _hashColor(_currentDisplayName);
+        caEl.innerHTML = 'Commenting as <strong style="color:' + color + '">@' + _esc(_currentDisplayName) + '</strong>';
+    }
+}).catch(function() {});
+
+// Load comments on page load
+_loadFuturisticComments();
 
 // --- Load related links ---
 fetch('/api/link/'+LID+'/related?limit=6').then(function(r){return r.json();}).then(function(data){

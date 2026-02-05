@@ -1104,22 +1104,6 @@ async def api_link_related(link_id: int, limit: int = 10):
 
 
 
-@router.post("/api/link/{link_id}/find-discussions")
-async def api_find_discussions(link_id: int):
-    """Manually trigger external discussion lookup for a link."""
-    link_resp = supabase.table("links").select("id, url").eq("id", link_id).execute()
-    if not link_resp.data:
-        raise HTTPException(status_code=404, detail="Link not found")
-    url = link_resp.data[0]["url"]
-    
-    def _run():
-        fetch_and_save_external_discussions(link_id, url)
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    
-    return {"ok": True, "message": "Discussion lookup started"}
-
-
 @router.get("/api/link/{link_id}/discussions")
 async def api_get_discussions(link_id: int):
     """Get external discussions for a link."""

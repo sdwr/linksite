@@ -24,9 +24,18 @@ supabase = None
 ingest_module = None
 
 def init(sb_client, ingest_mod):
-    global supabase, ingest_module
+    global supabase, ingest_module, _reddit_stats
     supabase = sb_client
     ingest_module = ingest_mod
+    
+    # Load persisted Reddit stats NOW that supabase is available
+    persisted = _load_reddit_stats_from_db()
+    if persisted:
+        _reddit_stats["total_calls"] = persisted.get("total_calls", 0)
+        _reddit_stats["searches"] = persisted.get("searches", 0)
+        _reddit_stats["resolves"] = persisted.get("resolves", 0)
+        _reddit_stats["token_refreshes"] = persisted.get("token_refreshes", 0)
+        print(f"[RedditStats] Loaded: {persisted}")
 
 
 # ============================================================
@@ -61,18 +70,16 @@ def _save_reddit_stats_to_db():
     except Exception as e:
         print(f"[RedditStats] Save error: {e}")
 
-# Load persisted stats on startup
-_persisted_stats = _load_reddit_stats_from_db()
-
+# Reddit stats - loaded properly in init() after supabase is available
 _reddit_stats = {
     "last_call_time": 0,
-    "total_calls": _persisted_stats.get("total_calls", 0),
+    "total_calls": 0,
     "last_error": None,
     "last_error_time": None,
-    "token_refreshes": _persisted_stats.get("token_refreshes", 0),
+    "token_refreshes": 0,
     "last_search_time": None,
-    "searches": _persisted_stats.get("searches", 0),
-    "resolves": _persisted_stats.get("resolves", 0),
+    "searches": 0,
+    "resolves": 0,
     "started_at": _time.time(),
 }
 

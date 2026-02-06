@@ -1309,14 +1309,22 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             print(f"Error finding related: {e}")
             return []
 
-    async def _fetch_discussions_bg(link_id, url):
-        """Background task to fetch external discussions + reverse lookup."""
-        import threading
-        def _run():
-            fetch_and_save_external_discussions(link_id, url)
-            check_reverse_lookup(url, link_id)
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+    def _ensure_processing_row(link_id: int, priority: int = 5, is_discussion_url: bool = False):
+        """Create a link_processing row for the worker to process."""
+        try:
+            reverse_status = 'pending' if is_discussion_url else None
+            supabase.table('link_processing').insert({
+                'link_id': link_id,
+                'reddit_status': 'pending',
+                'hn_status': 'pending', 
+                'summary_status': 'skipped',  # Not processed by worker yet
+                'priority': priority,
+                'reverse_lookup_status': reverse_status,
+            }).execute()
+            print(f"[Add] Created link_processing row for {link_id} (priority={priority}, reverse={reverse_status})")
+        except Exception as e:
+            # May already exist from migration backfill
+            print(f"[Add] link_processing insert error (may exist): {e}")
 
     # ========== GET /add — Check Link page ==========
     @app.get("/add", response_class=HTMLResponse)
@@ -1357,77 +1365,33 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             link_id = existing.data[0]['id']
             return RedirectResponse(url=f"/link/{link_id}", status_code=303)
 
-        # Check if this is a Reddit/HN discussion URL - if so, resolve to the article first
-        from scratchpad_api import resolve_reddit_url, resolve_hn_url
+        # Check if this is a Reddit/HN discussion URL
+        # If so, create it with reverse_lookup_status='pending' and let the worker resolve it
         from urllib.parse import urlparse
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
-        resolved_url = None
-        discussion_url = None
-        platform = None
         
-        if "reddit.com" in domain and "/comments/" in url:
-            resolved_url = resolve_reddit_url(url)
-            discussion_url = url
-            platform = "reddit"
-        elif "news.ycombinator.com" in domain:
-            resolved_url = resolve_hn_url(url)
-            discussion_url = url
-            platform = "hackernews"
+        if ("reddit.com" in domain and "/comments/" in url) or "news.ycombinator.com" in domain:
+            # Create the discussion link directly (worker will resolve to article)
+            result = supabase.table('links').insert({
+                'url': url,
+                'title': '',
+                'description': '',
+                'submitted_by': 'web',
+                'source': 'discussion-submission',  # Mark as user-submitted discussion
+                'processing_status': 'new',
+                'processing_priority': 10,
+            }).execute()
+            if not result.data:
+                return RedirectResponse(url="/add?error=Failed+to+create+link", status_code=303)
+            link_id = result.data[0]['id']
+            
+            # Create processing row with reverse_lookup_status='pending' (high priority)
+            _ensure_processing_row(link_id, priority=10, is_discussion_url=True)
+            
+            # Redirect to link page - it will poll for reverse lookup completion and redirect
+            return RedirectResponse(url=f"/link/{link_id}", status_code=303)
         
-        if resolved_url:
-            # This is a discussion link - use the resolved article URL instead
-            resolved_url = normalize_url(resolved_url)
-            
-            # Check if article already exists
-            existing_article = supabase.table('links').select('id').eq('url', resolved_url).execute()
-            if existing_article.data:
-                link_id = existing_article.data[0]['id']
-            else:
-                # Create the article
-                result = supabase.table('links').insert({
-                    'url': resolved_url,
-                    'title': '',
-                    'description': '',
-                    'submitted_by': 'web',
-                    'source': 'scratchpad',
-                    'processing_status': 'new',
-                    'processing_priority': 10,
-                }).execute()
-                if not result.data:
-                    return RedirectResponse(url="/add?error=Failed+to+create+link", status_code=303)
-                link_id = result.data[0]['id']
-                background_tasks.add_task(_ingest_link_content, link_id, resolved_url)
-                background_tasks.add_task(_ensure_parent_site, resolved_url, link_id)
-            
-            # Add the discussion URL as an external discussion
-            import re
-            external_id = None
-            if platform == "reddit":
-                match = re.search(r'/comments/([a-z0-9]+)', discussion_url)
-                external_id = match.group(1) if match else f"manual-{link_id}"
-            elif platform == "hackernews":
-                match = re.search(r'id=(\d+)', discussion_url)
-                external_id = match.group(1) if match else f"manual-{link_id}"
-            
-            try:
-                supabase.table("external_discussions").upsert({
-                    "link_id": link_id,
-                    "platform": platform,
-                    "external_url": discussion_url,
-                    "external_id": external_id,
-                    "title": "",
-                    "score": 0,
-                    "num_comments": 0,
-                }, on_conflict="link_id,platform,external_id").execute()
-                print(f"[Add] Added {platform} discussion for article {link_id}: {discussion_url}")
-            except Exception as e:
-                print(f"[Add] Error adding external discussion: {e}")
-            
-            # Also fetch other discussions for the article
-            background_tasks.add_task(_fetch_discussions_bg, link_id, resolved_url)
-            return RedirectResponse(url=f"/link/{link_id}?message=Resolved+to+article", status_code=303)
-
         # Normal link (not a discussion URL)
         insert_data = {
             'url': url,
@@ -1443,9 +1407,13 @@ def register_scratchpad_routes(app, supabase, vectorize_fn):
             return RedirectResponse(url="/add?error=Failed+to+create+link", status_code=303)
         link_id = result.data[0]['id']
 
+        # Create processing row - worker will handle external discussion lookups
+        _ensure_processing_row(link_id, priority=10)
+        
+        # Ingest content and set parent (still async for immediate UX)
         background_tasks.add_task(_ingest_link_content, link_id, url)
         background_tasks.add_task(_ensure_parent_site, url, link_id)
-        background_tasks.add_task(_fetch_discussions_bg, link_id, url)
+        
         return RedirectResponse(url=f"/link/{link_id}", status_code=303)
 
     # ========== GET /link/{id} — Detail page (lazy-loaded sections) ==========
@@ -2063,6 +2031,47 @@ function _renderDiscussions(disc){
 }
 
 function _pollStatus(){
+    // First check processing status (including reverse lookup for discussion URLs)
+    fetch('/api/link/'+LID+'/processing').then(function(r){return r.json();}).then(function(procData){
+        // Handle reverse lookup redirect
+        if(procData.reverse_lookup && procData.reverse_lookup.status === 'completed' && procData.reverse_lookup.target_id){
+            console.log('[LiveLoad] Reverse lookup complete, redirecting to article', procData.reverse_lookup.target_id);
+            window.location.href = '/link/' + procData.reverse_lookup.target_id;
+            return;
+        }
+        
+        // Check if any tasks are still pending
+        var anyPending = (procData.reddit && procData.reddit.status === 'pending') ||
+                        (procData.hn && procData.hn.status === 'pending') ||
+                        (procData.reverse_lookup && procData.reverse_lookup.status === 'pending');
+        
+        // Update processing indicator
+        var procEl = document.getElementById('processing-indicator');
+        if(procEl){
+            if(anyPending){
+                procEl.style.display = '';
+                var pendingText = [];
+                if(procData.reverse_lookup && procData.reverse_lookup.status === 'pending') pendingText.push('resolving link');
+                if(procData.reddit && procData.reddit.status === 'pending') pendingText.push('checking Reddit');
+                if(procData.hn && procData.hn.status === 'pending') pendingText.push('checking HN');
+                var msg = 'Processing: ' + pendingText.join(', ') + '...';
+                var spanEl = procEl.querySelector('span');
+                if(spanEl) spanEl.textContent = msg;
+            } else {
+                procEl.style.display = 'none';
+            }
+        }
+        
+        // Stop polling when all tasks are done
+        if(!anyPending){
+            if(_pollInterval){clearInterval(_pollInterval);_pollInterval=null;}
+            console.log('[LiveLoad] All processing complete, stopped polling');
+        }
+    }).catch(function(e){
+        console.error('[LiveLoad] Processing poll error:', e);
+    });
+    
+    // Also fetch link status for summary/discussions updates
     fetch('/api/link/'+LID+'/status').then(function(r){return r.json();}).then(function(data){
         var status = data.processing_status||'new';
         
@@ -2094,24 +2103,8 @@ function _pollStatus(){
             _renderDiscussions(data.discussions);
             _lastDiscCount=discCount;
         }
-        
-        // Update processing indicator
-        var procEl=document.getElementById('processing-indicator');
-        if(procEl){
-            if(status==='completed'||status==='failed'){
-                procEl.style.display='none';
-            }else{
-                procEl.style.display='';
-            }
-        }
-        
-        // Stop polling when done
-        if(status==='completed'||status==='failed'){
-            if(_pollInterval){clearInterval(_pollInterval);_pollInterval=null;}
-            console.log('[LiveLoad] Processing complete, stopped polling');
-        }
     }).catch(function(e){
-        console.error('[LiveLoad] Poll error:',e);
+        console.error('[LiveLoad] Status poll error:',e);
     });
 }
 
@@ -2174,11 +2167,23 @@ if(PROCESSING_STATUS==='new'||PROCESSING_STATUS==='processing'){
     # ========== POST /link/{id}/refresh-discussions ==========
     @app.post("/link/{link_id}/refresh-discussions")
     async def page_refresh_discussions(link_id: int, background_tasks: BackgroundTasks):
-        link_resp = supabase.table('links').select('url').eq('id', link_id).execute()
-        if link_resp.data:
-            url = link_resp.data[0]['url']
-            background_tasks.add_task(_fetch_discussions_bg, link_id, url)
-        return RedirectResponse(url=f"/link/{link_id}?message=Checking+HN+and+Reddit...", status_code=303)
+        # Reset the processing status to pending so the worker will re-check
+        try:
+            supabase.table('link_processing').update({
+                'reddit_status': 'pending',
+                'hn_status': 'pending',
+                'reddit_error': None,
+                'hn_error': None,
+            }).eq('link_id', link_id).execute()
+            print(f"[Refresh] Reset discussion status for link {link_id}")
+        except Exception as e:
+            # Create row if it doesn't exist
+            try:
+                _ensure_processing_row(link_id, priority=10)
+            except Exception:
+                pass
+            print(f"[Refresh] Error resetting status, created new row: {e}")
+        return RedirectResponse(url=f"/link/{link_id}?message=Queued+for+refresh...", status_code=303)
 
     # ========== GET /link/{id}/remove-tag/{slug} ==========
     @app.get("/link/{link_id}/remove-tag/{slug}")

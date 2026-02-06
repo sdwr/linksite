@@ -1,10 +1,17 @@
 """
 Background Worker for Link Processing
 
+NEW ARCHITECTURE (2025-01):
+- Uses link_processing table for per-task status tracking
+- Tick-based loop (every 2 seconds) processes ONE item per tick
+- Priority queue: reverse lookups → user-submitted → recent → backlog
+- Respects rate limits (30/min Reddit, 30/min HN)
+
 Handles:
+- Reddit discussion lookup
+- HN discussion lookup  
 - AI summarization (with budget constraints)
-- Reddit/HN reverse lookup for external discussions
-- Processing queue management
+- Reverse URL lookup (Reddit/HN discussion URL → original article)
 
 Budget constraint: $50/month max for Anthropic API
 """
@@ -14,14 +21,14 @@ import asyncio
 import httpx
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
 from uuid import uuid4
 
 from db import query, query_one, execute
 from psycopg2.extras import Json
 from backoff import (
     check_backoff, record_success, record_failure, get_backoff_status,
-    check_rate_and_backoff, record_request, get_rate_limit_status
+    check_rate_and_backoff, record_request, check_rate_limit, get_rate_limit_status
 )
 
 # ============================================================
@@ -29,6 +36,7 @@ from backoff import (
 # ============================================================
 
 MONTHLY_BUDGET_USD = 50.0
+TICK_INTERVAL_SECONDS = 2  # Process one item every 2 seconds
 
 # Claude Sonnet pricing per 1M tokens
 SONNET_MODEL = "claude-3-5-sonnet-20241022"
@@ -36,6 +44,22 @@ SONNET_INPUT_PRICE = 3.0   # $3 per 1M input tokens
 SONNET_OUTPUT_PRICE = 15.0  # $15 per 1M output tokens
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+
+
+# ============================================================
+# Helper: Ensure processing row exists
+# ============================================================
+
+def ensure_processing_row(link_id: int, priority: int = 5) -> None:
+    """Create a link_processing row if it doesn't exist."""
+    execute(
+        """
+        INSERT INTO link_processing (link_id, priority) 
+        VALUES (%s, %s) 
+        ON CONFLICT (link_id) DO NOTHING
+        """,
+        (link_id, priority)
+    )
 
 
 # ============================================================
@@ -63,16 +87,6 @@ def check_budget_ok(limit: float = MONTHLY_BUDGET_USD) -> bool:
     """Return True if monthly spend < limit."""
     spent = get_monthly_ai_spend()
     return spent < limit
-
-
-async def get_monthly_ai_spend_async() -> float:
-    """Async wrapper for get_monthly_ai_spend."""
-    return get_monthly_ai_spend()
-
-
-async def check_budget_ok_async(limit: float = MONTHLY_BUDGET_USD) -> bool:
-    """Async wrapper for check_budget_ok."""
-    return check_budget_ok(limit)
 
 
 # ============================================================
@@ -108,8 +122,6 @@ async def generate_summary(link: dict) -> Optional[str]:
     
     Input: link dict with title, description, content
     Output: 2-3 sentence summary, or None on failure
-    
-    Tracks tokens in ai_token_usage table.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
@@ -129,7 +141,6 @@ async def generate_summary(link: dict) -> Optional[str]:
         print(f"[Worker] Link {link_id} has no content to summarize")
         return None
     
-    # Build prompt
     prompt = f"""Generate a 2-3 sentence summary for this link.
 
 Title: {title}
@@ -202,233 +213,313 @@ Just output the summary, no preamble."""
 
 
 # ============================================================
-# External Discussion Discovery
+# Priority Queue: Get Next Work Item
 # ============================================================
 
-async def run_external_discussion_lookup(link_id: int, url: str):
+def get_next_work_item() -> Optional[Dict[str, Any]]:
     """
-    Run Reddit/HN reverse lookup for a link.
-    Uses existing functions from scratchpad_api but with backoff + rate limit checking.
+    Get highest priority item needing processing.
+    
+    Priority order:
+    1. Reverse lookups (user waiting for redirect)
+    2. Reddit lookups for user-submitted links (high priority)
+    3. HN lookups for user-submitted links
+    4. Reddit lookups for recent links
+    5. HN lookups for recent links
+    6. Backlog
+    
+    Returns dict with: link_id, url, task_type
     """
-    from scratchpad_api import fetch_and_save_external_discussions, check_reverse_lookup
+    # 1. Pending reverse lookups (highest priority - user is waiting)
+    item = query_one("""
+        SELECT lp.link_id, l.url, 'reverse_lookup' as task_type
+        FROM link_processing lp
+        JOIN links l ON l.id = lp.link_id
+        WHERE lp.reverse_lookup_status = 'pending'
+        ORDER BY lp.created_at ASC
+        LIMIT 1
+    """)
+    if item:
+        return dict(item)
     
-    # Check both backoff AND rate limit for reddit
-    if not check_rate_and_backoff("reddit"):
-        print(f"[Worker] Skipping Reddit lookup for {link_id} - in backoff or rate limited")
-        return
+    # 2. Reddit lookups (prioritize high-priority, then by age)
+    # Check rate limit first
+    if check_rate_limit("reddit") and check_backoff("reddit"):
+        item = query_one("""
+            SELECT lp.link_id, l.url, 'reddit' as task_type
+            FROM link_processing lp
+            JOIN links l ON l.id = lp.link_id
+            WHERE lp.reddit_status = 'pending'
+            ORDER BY lp.priority DESC, lp.created_at ASC
+            LIMIT 1
+        """)
+        if item:
+            return dict(item)
     
-    try:
-        # Run the existing external discussion fetch
-        fetch_and_save_external_discussions(link_id, url)
-        
-        # Check reverse lookup (if this is an HN/Reddit link)
-        check_reverse_lookup(url, link_id)
-        
-        record_success("reddit")
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[Worker] External discussion lookup failed for link {link_id}: {error_msg}")
-        record_failure("reddit", error_msg)
+    # 3. HN lookups
+    if check_rate_limit("hackernews") and check_backoff("hackernews"):
+        item = query_one("""
+            SELECT lp.link_id, l.url, 'hn' as task_type
+            FROM link_processing lp
+            JOIN links l ON l.id = lp.link_id
+            WHERE lp.hn_status = 'pending'
+            ORDER BY lp.priority DESC, lp.created_at ASC
+            LIMIT 1
+        """)
+        if item:
+            return dict(item)
+    
+    # NOTE: Summary generation is NOT handled by the worker yet
+    # summary_status column exists for future use, but summaries remain manual for now
+    
+    return None
 
 
 # ============================================================
-# Job Logging
+# Process Individual Work Items
 # ============================================================
 
-def _log_job_start(job_type: str, metadata: dict = None) -> str:
-    """Create a job_runs entry, return job_id."""
-    job_id = str(uuid4())
-    execute(
-        """
-        INSERT INTO job_runs (id, job_type, status, metadata, started_at)
-        VALUES (%s, %s, 'running', %s, now())
-        """,
-        (job_id, job_type, Json(metadata or {}))
-    )
-    return job_id
-
-
-def _log_job_complete(job_id: str, items_processed: int, error: str = None, links_processed: list = None):
-    """Mark a job as completed or failed, with optional list of processed link IDs."""
-    status = "failed" if error else "completed"
-    execute(
-        """
-        UPDATE job_runs 
-        SET status = %s, completed_at = now(), items_processed = %s, errors = %s::jsonb, links_processed = %s::jsonb
-        WHERE id = %s
-        """,
-        (status, items_processed, json.dumps([error[:500]]) if error else '[]', 
-         json.dumps(links_processed or []), job_id)
-    )
-
-
-# ============================================================
-# Main Worker Function
-# ============================================================
-
-async def run_processing_batch(batch_size: int = 20) -> dict:
+async def process_reverse_lookup(link_id: int, url: str) -> bool:
     """
-    Main worker function - processes a batch of links.
-    
-    1. Check monthly budget (query ai_token_usage for current month)
-       - If >= $50, log and skip AI steps
-    
-    2. Get batch of links:
-       SELECT * FROM links 
-       WHERE processing_status = 'new'
-       ORDER BY processing_priority DESC, created_at ASC
-       LIMIT batch_size
-    
-    3. For each link:
-       a. Set processing_status = 'processing'
-       b. If budget OK and no summary:
-          - Check backoff for 'anthropic'
-          - If OK: Generate summary with Sonnet
-          - Record token usage
-          - Handle failure with backoff.record_failure()
-       c. If no external discussions found:
-          - Check backoff for 'reddit'  
-          - If OK: Run Reddit reverse lookup
-          - Handle failure with backoff
-       d. Set processing_status = 'completed', last_processed_at = now()
-    
-    4. Log job_run with items_processed count
-    
-    Returns dict with processing results.
+    Resolve Reddit/HN discussion URL to original article.
+    Returns True if successful, False if should retry later.
     """
-    job_id = _log_job_start("process_batch", {"batch_size": batch_size})
+    from urllib.parse import urlparse
+    from scratchpad_api import resolve_reddit_url, resolve_hn_url, normalize_url
     
-    try:
-        # 1. Check monthly budget
-        monthly_spend = get_monthly_ai_spend()
-        budget_ok = monthly_spend < MONTHLY_BUDGET_USD
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+    
+    original_url = None
+    platform = None
+    
+    if "reddit.com" in domain:
+        if not check_rate_limit("reddit"):
+            return False  # Rate limited, will retry next tick
+        record_request("reddit")
+        try:
+            original_url = resolve_reddit_url(url)
+            platform = "reddit"
+        except Exception as e:
+            print(f"[Worker] Reddit resolve error for {link_id}: {e}")
+            execute("""
+                UPDATE link_processing 
+                SET reverse_lookup_status = 'failed', reddit_error = %s, updated_at = NOW()
+                WHERE link_id = %s
+            """, (str(e)[:500], link_id))
+            return True  # Don't retry on error
+            
+    elif "news.ycombinator.com" in domain:
+        if not check_rate_limit("hackernews"):
+            return False  # Rate limited, will retry next tick
+        record_request("hackernews")
+        try:
+            original_url = resolve_hn_url(url)
+            platform = "hackernews"
+        except Exception as e:
+            print(f"[Worker] HN resolve error for {link_id}: {e}")
+            execute("""
+                UPDATE link_processing 
+                SET reverse_lookup_status = 'failed', hn_error = %s, updated_at = NOW()
+                WHERE link_id = %s
+            """, (str(e)[:500], link_id))
+            return True
+    else:
+        # Not a discussion URL
+        execute("""
+            UPDATE link_processing 
+            SET reverse_lookup_status = 'skipped', updated_at = NOW()
+            WHERE link_id = %s
+        """, (link_id,))
+        return True
+    
+    if original_url:
+        # Normalize and find/create the original article
+        original_url = normalize_url(original_url)
         
-        if not budget_ok:
-            print(f"[Worker] Monthly budget exceeded (${monthly_spend:.2f}/${MONTHLY_BUDGET_USD}), skipping AI processing")
-        
-        # 2. Get batch of links with 'new' status only
-        links = query(
-            """
-            SELECT id, url, title, description, content, summary, processing_status
-            FROM links
-            WHERE processing_status = 'new'
-            ORDER BY processing_priority DESC, created_at ASC
-            LIMIT %s
-            """,
-            (batch_size,)
+        # Check if original already exists
+        existing = query_one(
+            "SELECT id FROM links WHERE url = %s",
+            (original_url,)
         )
         
-        if not links:
-            print("[Worker] No links to process")
-            _log_job_complete(job_id, 0)
-            return {
-                "processed": 0,
-                "summaries_generated": 0,
-                "discussions_found": 0,
-                "monthly_spend": monthly_spend,
-                "budget_ok": budget_ok,
-            }
+        if existing:
+            original_link_id = existing["id"]
+        else:
+            # Create the original article
+            result = execute("""
+                INSERT INTO links (url, source, submitted_by, processing_status, processing_priority)
+                VALUES (%s, 'reverse-lookup', 'worker', 'new', 5)
+                RETURNING id
+            """, (original_url,))
+            original_link_id = result[0]["id"] if result else None
+            
+            if original_link_id:
+                # Create processing row for the new link
+                ensure_processing_row(original_link_id, priority=5)
         
-        print(f"[Worker] Processing batch of {len(links)} links")
-        
-        summaries_generated = 0
-        discussions_checked = 0
-        errors = []
-        processed_link_ids = []  # Track which links we processed
-        
-        # 3. Process each link
-        for link in links:
-            link_id = link["id"]
-            url = link.get("url", "")
+        if original_link_id:
+            # Update processing record
+            execute("""
+                UPDATE link_processing 
+                SET reverse_lookup_status = 'completed',
+                    reverse_lookup_target_id = %s,
+                    updated_at = NOW()
+                WHERE link_id = %s
+            """, (original_link_id, link_id))
+            
+            # Add discussion URL as external discussion for the article
+            import re
+            external_id = None
+            if platform == "reddit":
+                match = re.search(r'/comments/([a-z0-9]+)', url)
+                external_id = match.group(1) if match else f"manual-{link_id}"
+            elif platform == "hackernews":
+                match = re.search(r'id=(\d+)', url)
+                external_id = match.group(1) if match else f"manual-{link_id}"
             
             try:
-                # a. Set processing_status = 'processing'
-                execute(
-                    "UPDATE links SET processing_status = 'processing' WHERE id = %s",
-                    (link_id,)
-                )
-                
-                # b. Generate summary if budget OK and no existing summary
-                if budget_ok and not link.get("summary"):
-                    if check_backoff("anthropic"):
-                        summary = await generate_summary(link)
-                        if summary:
-                            execute(
-                                "UPDATE links SET summary = %s WHERE id = %s",
-                                (summary, link_id)
-                            )
-                            summaries_generated += 1
-                            print(f"[Worker] Generated summary for link {link_id}")
-                    else:
-                        print(f"[Worker] Skipping summary for link {link_id} - anthropic in backoff")
-                
-                # c. Check for external discussions
-                # First check if we already have discussions for this link
-                existing_disc = query_one(
-                    "SELECT id FROM external_discussions WHERE link_id = %s LIMIT 1",
-                    (link_id,)
-                )
-                
-                if not existing_disc and url:
-                    await run_external_discussion_lookup(link_id, url)
-                    discussions_checked += 1
-                
-                # d. Set processing_status = 'completed'
-                execute(
-                    """
-                    UPDATE links 
-                    SET processing_status = 'completed', last_processed_at = now()
-                    WHERE id = %s
-                    """,
-                    (link_id,)
-                )
-                
-                # Track this link as successfully processed
-                processed_link_ids.append(link_id)
-                
+                execute("""
+                    INSERT INTO external_discussions 
+                    (link_id, platform, external_url, external_id, title, score, num_comments)
+                    VALUES (%s, %s, %s, %s, '', 0, 0)
+                    ON CONFLICT (link_id, platform, external_id) DO NOTHING
+                """, (original_link_id, platform, url, external_id))
             except Exception as e:
-                error_msg = f"Link {link_id}: {str(e)}"
-                errors.append(error_msg)
-                print(f"[Worker] Error processing link {link_id}: {e}")
-                
-                # Mark as failed
-                execute(
-                    """
-                    UPDATE links 
-                    SET processing_status = 'failed', last_processed_at = now()
-                    WHERE id = %s
-                    """,
-                    (link_id,)
-                )
+                print(f"[Worker] Error adding external discussion: {e}")
+            
+            # Mark original discussion link as discussion-ref
+            execute("""
+                UPDATE links 
+                SET source = 'discussion-ref', parent_link_id = %s
+                WHERE id = %s
+            """, (original_link_id, link_id))
+            
+            print(f"[Worker] Resolved {platform} discussion {link_id} → article {original_link_id}")
+    else:
+        # No original found (self-post or error)
+        execute("""
+            UPDATE link_processing 
+            SET reverse_lookup_status = 'not_found', updated_at = NOW()
+            WHERE link_id = %s
+        """, (link_id,))
+        execute("""
+            UPDATE links SET source = 'discussion-ref' WHERE id = %s
+        """, (link_id,))
+        print(f"[Worker] Reverse lookup found no original for {link_id}")
+    
+    return True
+
+
+async def process_reddit_lookup(link_id: int, url: str) -> bool:
+    """Search Reddit for discussions about this URL."""
+    from scratchpad_api import find_external_discussions, save_external_discussions
+    
+    if not check_rate_limit("reddit"):
+        return False  # Rate limited, will retry next tick
+    
+    record_request("reddit")
+    
+    try:
+        # Use find_external_discussions which handles both Reddit and HN
+        # We'll filter for Reddit only
+        all_discussions = find_external_discussions(url)
+        reddit_discussions = [d for d in all_discussions if d.get("platform") == "reddit"]
         
-        # 4. Log job completion with processed link IDs
-        _log_job_complete(
-            job_id, 
-            len(links), 
-            "; ".join(errors) if errors else None,
-            links_processed=processed_link_ids
-        )
+        if reddit_discussions:
+            save_external_discussions(link_id, reddit_discussions)
+            status = 'completed'
+        else:
+            status = 'not_found'
         
-        result = {
-            "processed": len(links),
-            "summaries_generated": summaries_generated,
-            "discussions_checked": discussions_checked,
-            "errors": len(errors),
-            "monthly_spend": monthly_spend,
-            "budget_ok": budget_ok,
-        }
+        execute("""
+            UPDATE link_processing 
+            SET reddit_status = %s, reddit_checked_at = NOW(), updated_at = NOW()
+            WHERE link_id = %s
+        """, (status, link_id))
         
-        print(f"[Worker] Batch complete: {result}")
-        return result
+        record_success("reddit")
+        print(f"[Worker] Reddit lookup for {link_id}: {status} ({len(reddit_discussions)} found)")
+        return True
         
     except Exception as e:
-        error_msg = str(e)
-        print(f"[Worker] Batch processing failed: {error_msg}")
-        _log_job_complete(job_id, 0, error_msg)
-        return {
-            "processed": 0,
-            "error": error_msg,
-        }
+        error_msg = str(e)[:500]
+        print(f"[Worker] Reddit lookup error for {link_id}: {e}")
+        execute("""
+            UPDATE link_processing 
+            SET reddit_status = 'failed', reddit_error = %s, updated_at = NOW()
+            WHERE link_id = %s
+        """, (error_msg, link_id))
+        record_failure("reddit", error_msg)
+        return True
+
+
+async def process_hn_lookup(link_id: int, url: str) -> bool:
+    """Search HN for discussions about this URL."""
+    from scratchpad_api import find_external_discussions, save_external_discussions
+    
+    if not check_rate_limit("hackernews"):
+        return False  # Rate limited, will retry next tick
+    
+    record_request("hackernews")
+    
+    try:
+        # Use find_external_discussions and filter for HN
+        all_discussions = find_external_discussions(url)
+        hn_discussions = [d for d in all_discussions if d.get("platform") == "hackernews"]
+        
+        if hn_discussions:
+            save_external_discussions(link_id, hn_discussions)
+            status = 'completed'
+        else:
+            status = 'not_found'
+        
+        execute("""
+            UPDATE link_processing 
+            SET hn_status = %s, hn_checked_at = NOW(), updated_at = NOW()
+            WHERE link_id = %s
+        """, (status, link_id))
+        
+        record_success("hackernews")
+        print(f"[Worker] HN lookup for {link_id}: {status} ({len(hn_discussions)} found)")
+        return True
+        
+    except Exception as e:
+        error_msg = str(e)[:500]
+        print(f"[Worker] HN lookup error for {link_id}: {e}")
+        execute("""
+            UPDATE link_processing 
+            SET hn_status = 'failed', hn_error = %s, updated_at = NOW()
+            WHERE link_id = %s
+        """, (error_msg, link_id))
+        record_failure("hackernews", error_msg)
+        return True
+
+
+async def process_work_item(item: Dict[str, Any]) -> bool:
+    """
+    Process a single work item.
+    Returns True if completed, False if should retry later.
+    """
+    link_id = item["link_id"]
+    url = item.get("url", "")
+    task_type = item["task_type"]
+    
+    try:
+        if task_type == "reverse_lookup":
+            return await process_reverse_lookup(link_id, url)
+        elif task_type == "reddit":
+            return await process_reddit_lookup(link_id, url)
+        elif task_type == "hn":
+            return await process_hn_lookup(link_id, url)
+        # NOTE: summary task_type is not processed yet - summaries remain manual
+        else:
+            print(f"[Worker] Unknown task type: {task_type}")
+            return True
+            
+    except Exception as e:
+        print(f"[Worker] Error processing {task_type} for {link_id}: {e}")
+        return True  # Don't retry on unexpected errors
 
 
 # ============================================================
@@ -437,123 +528,147 @@ async def run_processing_batch(batch_size: int = 20) -> dict:
 
 def get_worker_status() -> dict:
     """Get current worker status for admin display."""
-    # Queue size
-    queue = query_one(
-        "SELECT COUNT(*) as count FROM links WHERE processing_status = 'new'"
-    )
-    queue_size = queue["count"] if queue else 0
-    
-    # Processing count
-    processing = query_one(
-        "SELECT COUNT(*) as count FROM links WHERE processing_status = 'processing'"
-    )
-    processing_count = processing["count"] if processing else 0
+    # Queue stats from link_processing
+    queue_stats = query_one("""
+        SELECT 
+            SUM(CASE WHEN reddit_status = 'pending' THEN 1 ELSE 0 END) as reddit_pending,
+            SUM(CASE WHEN hn_status = 'pending' THEN 1 ELSE 0 END) as hn_pending,
+            SUM(CASE WHEN summary_status = 'pending' THEN 1 ELSE 0 END) as summary_pending,
+            SUM(CASE WHEN reverse_lookup_status = 'pending' THEN 1 ELSE 0 END) as reverse_pending,
+            SUM(CASE WHEN reddit_status = 'completed' THEN 1 ELSE 0 END) as reddit_completed,
+            SUM(CASE WHEN hn_status = 'completed' THEN 1 ELSE 0 END) as hn_completed,
+            SUM(CASE WHEN summary_status = 'completed' THEN 1 ELSE 0 END) as summary_completed,
+            SUM(CASE WHEN reddit_status = 'failed' THEN 1 ELSE 0 END) as reddit_failed,
+            SUM(CASE WHEN hn_status = 'failed' THEN 1 ELSE 0 END) as hn_failed,
+            SUM(CASE WHEN summary_status = 'failed' THEN 1 ELSE 0 END) as summary_failed,
+            COUNT(*) as total
+        FROM link_processing
+    """)
     
     # Monthly spend
     monthly_spend = get_monthly_ai_spend()
-    
-    # Budget status
     budget_remaining = max(0, MONTHLY_BUDGET_USD - monthly_spend)
     
-    # Backoff states (exponential backoff from failures)
+    # Backoff states
     anthropic_backoff = get_backoff_status("anthropic")
     reddit_backoff = get_backoff_status("reddit")
+    hackernews_backoff = get_backoff_status("hackernews")
     
-    # Rate limit states (rolling window usage)
-    anthropic_rate = get_rate_limit_status("anthropic")
+    # Rate limit states
     reddit_rate = get_rate_limit_status("reddit")
+    hackernews_rate = get_rate_limit_status("hackernews")
+    anthropic_rate = get_rate_limit_status("anthropic")
     
     # Recent job runs
-    recent_jobs = query(
-        """
+    recent_jobs = query("""
         SELECT job_type, status, started_at, completed_at, items_processed, errors
         FROM job_runs
-        WHERE job_type = 'process_batch'
         ORDER BY started_at DESC
         LIMIT 5
-        """
-    )
+    """)
     
     return {
-        "queue_size": queue_size,
-        "processing_count": processing_count,
-        "monthly_spend_usd": round(monthly_spend, 4),
-        "budget_limit_usd": MONTHLY_BUDGET_USD,
-        "budget_remaining_usd": round(budget_remaining, 4),
-        "budget_ok": monthly_spend < MONTHLY_BUDGET_USD,
+        "queue": {
+            "reddit_pending": queue_stats["reddit_pending"] or 0,
+            "hn_pending": queue_stats["hn_pending"] or 0,
+            "summary_pending": queue_stats["summary_pending"] or 0,
+            "reverse_pending": queue_stats["reverse_pending"] or 0,
+            "reddit_completed": queue_stats["reddit_completed"] or 0,
+            "hn_completed": queue_stats["hn_completed"] or 0,
+            "summary_completed": queue_stats["summary_completed"] or 0,
+            "reddit_failed": queue_stats["reddit_failed"] or 0,
+            "hn_failed": queue_stats["hn_failed"] or 0,
+            "summary_failed": queue_stats["summary_failed"] or 0,
+            "total": queue_stats["total"] or 0,
+        },
+        "budget": {
+            "monthly_spend_usd": round(monthly_spend, 4),
+            "budget_limit_usd": MONTHLY_BUDGET_USD,
+            "budget_remaining_usd": round(budget_remaining, 4),
+            "budget_ok": monthly_spend < MONTHLY_BUDGET_USD,
+        },
         "backoff_states": {
             "anthropic": anthropic_backoff,
             "reddit": reddit_backoff,
+            "hackernews": hackernews_backoff,
         },
         "rate_limit_states": {
-            "anthropic": anthropic_rate,
             "reddit": reddit_rate,
+            "hackernews": hackernews_rate,
+            "anthropic": anthropic_rate,
         },
         "recent_jobs": recent_jobs,
+        "worker_running": _worker_running,
+        "tick_interval_seconds": TICK_INTERVAL_SECONDS,
+    }
+
+
+def get_queue_summary() -> dict:
+    """Get a compact queue summary for display."""
+    stats = query_one("""
+        SELECT 
+            SUM(CASE WHEN reddit_status = 'pending' THEN 1 ELSE 0 END) as reddit_pending,
+            SUM(CASE WHEN hn_status = 'pending' THEN 1 ELSE 0 END) as hn_pending,
+            SUM(CASE WHEN summary_status = 'pending' THEN 1 ELSE 0 END) as summary_pending,
+            SUM(CASE WHEN reverse_lookup_status = 'pending' THEN 1 ELSE 0 END) as reverse_pending
+        FROM link_processing
+    """)
+    
+    return {
+        "reddit": stats["reddit_pending"] or 0,
+        "hn": stats["hn_pending"] or 0,
+        "summary": stats["summary_pending"] or 0,
+        "reverse": stats["reverse_pending"] or 0,
+        "total": (stats["reddit_pending"] or 0) + (stats["hn_pending"] or 0) + 
+                 (stats["summary_pending"] or 0) + (stats["reverse_pending"] or 0),
     }
 
 
 # ============================================================
-# Background Task Runner
+# Background Task Runner (Tick-Based)
 # ============================================================
 
 _worker_task: Optional[asyncio.Task] = None
 _worker_running = False
-_batch_lock: Optional[asyncio.Lock] = None
 
 
-def _get_batch_lock() -> asyncio.Lock:
-    """Get or create the batch lock (lazy init for asyncio compatibility)."""
-    global _batch_lock
-    if _batch_lock is None:
-        _batch_lock = asyncio.Lock()
-    return _batch_lock
-
-
-async def _worker_loop(interval_seconds: int = 180):
-    """Background loop that runs processing batches periodically."""
+async def _tick_loop():
+    """
+    Tick-based worker loop.
+    Every TICK_INTERVAL_SECONDS, process ONE work item.
+    This gives us even, predictable API traffic.
+    """
     global _worker_running
-    lock = _get_batch_lock()
-    print(f"[Worker] Background loop started (interval: {interval_seconds}s)")
+    print(f"[Worker] Tick-based loop started (interval: {TICK_INTERVAL_SECONDS}s)")
+    
+    items_processed = 0
+    last_log_time = datetime.now(timezone.utc)
     
     while _worker_running:
-        # Only run if not already processing a batch
-        if lock.locked():
-            print("[Worker] Batch already running, skipping this cycle")
-        else:
-            async with lock:
-                try:
-                    await run_processing_batch(batch_size=10)
-                except Exception as e:
-                    print(f"[Worker] Background batch error: {e}")
+        try:
+            item = get_next_work_item()
+            if item:
+                completed = await process_work_item(item)
+                if completed:
+                    items_processed += 1
+            
+            # Log progress every 60 seconds
+            now = datetime.now(timezone.utc)
+            if (now - last_log_time).total_seconds() >= 60:
+                queue = get_queue_summary()
+                print(f"[Worker] Progress: {items_processed} items processed. Queue: R:{queue['reddit']} HN:{queue['hn']} Sum:{queue['summary']} Rev:{queue['reverse']}")
+                last_log_time = now
+                items_processed = 0
+                
+        except Exception as e:
+            print(f"[Worker] Tick error: {e}")
         
-        # Wait for next interval
-        await asyncio.sleep(interval_seconds)
+        await asyncio.sleep(TICK_INTERVAL_SECONDS)
     
-    print("[Worker] Background loop stopped")
+    print("[Worker] Tick-based loop stopped")
 
 
-def reset_orphaned_processing_links():
-    """Reset any links stuck in 'processing' status back to 'new'.
-    
-    This handles links that were being processed when the app crashed.
-    Called on worker startup.
-    """
-    try:
-        # First count how many are stuck
-        stuck = query("SELECT COUNT(*) as cnt FROM links WHERE processing_status = 'processing'")
-        count = stuck[0]['cnt'] if stuck else 0
-        
-        if count > 0:
-            execute("UPDATE links SET processing_status = 'new' WHERE processing_status = 'processing'")
-            print(f"[Worker] Reset {count} orphaned 'processing' links back to 'new'")
-        else:
-            print("[Worker] No orphaned 'processing' links to reset")
-    except Exception as e:
-        print(f"[Worker] Error resetting orphaned links: {e}")
-
-
-def start_background_worker(interval_seconds: int = 180):
+def start_background_worker():
     """Start the background worker task."""
     global _worker_task, _worker_running
     
@@ -561,11 +676,8 @@ def start_background_worker(interval_seconds: int = 180):
         print("[Worker] Already running")
         return
     
-    # Reset any orphaned 'processing' links on startup
-    reset_orphaned_processing_links()
-    
     _worker_running = True
-    _worker_task = asyncio.create_task(_worker_loop(interval_seconds))
+    _worker_task = asyncio.create_task(_tick_loop())
     print("[Worker] Background worker started")
 
 
@@ -583,3 +695,96 @@ def stop_background_worker():
 def is_worker_running() -> bool:
     """Check if the background worker is running."""
     return _worker_running
+
+
+# ============================================================
+# Admin Actions
+# ============================================================
+
+def retry_failed_items(task_type: str = None) -> int:
+    """
+    Reset failed items back to pending for retry.
+    
+    Args:
+        task_type: 'reddit', 'hn', 'summary', or None for all
+    
+    Returns count of items reset.
+    """
+    count = 0
+    
+    if task_type is None or task_type == 'reddit':
+        result = execute("""
+            UPDATE link_processing 
+            SET reddit_status = 'pending', reddit_error = NULL
+            WHERE reddit_status = 'failed'
+        """)
+        count += len(result) if result else 0
+    
+    if task_type is None or task_type == 'hn':
+        result = execute("""
+            UPDATE link_processing 
+            SET hn_status = 'pending', hn_error = NULL
+            WHERE hn_status = 'failed'
+        """)
+        count += len(result) if result else 0
+    
+    if task_type is None or task_type == 'summary':
+        result = execute("""
+            UPDATE link_processing 
+            SET summary_status = 'pending', summary_error = NULL
+            WHERE summary_status = 'failed'
+        """)
+        count += len(result) if result else 0
+    
+    print(f"[Worker] Reset {count} failed items to pending (type: {task_type or 'all'})")
+    return count
+
+
+def get_failed_items(limit: int = 20) -> list:
+    """Get recently failed items with their errors."""
+    return query("""
+        SELECT 
+            lp.link_id,
+            l.url,
+            l.title,
+            lp.reddit_status,
+            lp.reddit_error,
+            lp.hn_status,
+            lp.hn_error,
+            lp.summary_status,
+            lp.summary_error,
+            lp.updated_at
+        FROM link_processing lp
+        JOIN links l ON l.id = lp.link_id
+        WHERE lp.reddit_status = 'failed' 
+           OR lp.hn_status = 'failed' 
+           OR lp.summary_status = 'failed'
+        ORDER BY lp.updated_at DESC
+        LIMIT %s
+    """, (limit,))
+
+
+# ============================================================
+# Legacy Compatibility
+# ============================================================
+
+async def run_processing_batch(batch_size: int = 20) -> dict:
+    """
+    Legacy batch processing function.
+    Now just runs tick-loop items synchronously.
+    Kept for compatibility with existing admin triggers.
+    """
+    processed = 0
+    for _ in range(batch_size):
+        item = get_next_work_item()
+        if not item:
+            break
+        completed = await process_work_item(item)
+        if completed:
+            processed += 1
+    
+    return {
+        "processed": processed,
+        "monthly_spend": get_monthly_ai_spend(),
+        "budget_ok": check_budget_ok(),
+    }

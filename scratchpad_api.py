@@ -388,14 +388,8 @@ def ingest_link_async(link_id: int, url: str):
 
     thread = threading.Thread(target=_ingest, daemon=True)
     thread.start()
-    # Also fetch external discussions in background
-    def _ext_disc():
-        import time
-        time.sleep(2)  # small delay to let ingestion start first
-        fetch_and_save_external_discussions(link_id, url)
-        check_reverse_lookup(url, link_id)
-    ext_thread = threading.Thread(target=_ext_disc, daemon=True)
-    ext_thread.start()
+    # NOTE: External discussions are now handled by the worker queue (link_processing table)
+    # The background thread that was here has been removed - all external API calls go through worker.py
 
 
 def get_link_tags(link_id: int) -> list:
@@ -1154,6 +1148,64 @@ async def api_link_status(link_id: int):
         "has_image": has_image,
         "title": link.get("title"),
         "og_image_url": link.get("og_image_url"),
+    }
+
+
+@router.get("/api/link/{link_id}/processing")
+async def api_link_processing_status(link_id: int):
+    """
+    Get detailed processing status from link_processing table.
+    Used for live-loading UI to show spinners/status for each task.
+    
+    Returns:
+    {
+        reddit: {status, checked_at, error},
+        hn: {status, checked_at, error},
+        summary: {status, generated_at, error},
+        reverse_lookup: {status, target_id}
+    }
+    """
+    # Query link_processing table
+    proc = supabase.table("link_processing").select("*").eq("link_id", link_id).execute()
+    
+    if not proc.data:
+        # No processing row yet - return defaults
+        return {
+            "link_id": link_id,
+            "exists": False,
+            "reddit": {"status": "pending", "checked_at": None, "error": None},
+            "hn": {"status": "pending", "checked_at": None, "error": None},
+            "summary": {"status": "pending", "generated_at": None, "error": None},
+            "reverse_lookup": {"status": None, "target_id": None},
+        }
+    
+    p = proc.data[0]
+    
+    return {
+        "link_id": link_id,
+        "exists": True,
+        "reddit": {
+            "status": p.get("reddit_status", "pending"),
+            "checked_at": p.get("reddit_checked_at"),
+            "error": p.get("reddit_error"),
+        },
+        "hn": {
+            "status": p.get("hn_status", "pending"),
+            "checked_at": p.get("hn_checked_at"),
+            "error": p.get("hn_error"),
+        },
+        "summary": {
+            "status": p.get("summary_status", "pending"),
+            "generated_at": p.get("summary_generated_at"),
+            "error": p.get("summary_error"),
+        },
+        "reverse_lookup": {
+            "status": p.get("reverse_lookup_status"),
+            "target_id": p.get("reverse_lookup_target_id"),
+        },
+        "priority": p.get("priority", 5),
+        "created_at": p.get("created_at"),
+        "updated_at": p.get("updated_at"),
     }
 
 

@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
     # Auto-start the director, gather scheduler, and background worker
     director.start()
     gather_scheduler.start()
-    start_background_worker(interval_seconds=90)  # Run processing batch every 90 seconds
+    start_background_worker()  # Tick-based worker (2s intervals)
     print("[App] Ready. Director, GatherScheduler, and Worker auto-started.")
     yield
     director.stop()

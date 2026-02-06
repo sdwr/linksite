@@ -5,8 +5,6 @@ from youtube_transcript_api._errors import (
     TranscriptsDisabled, 
     NoTranscriptFound, 
     VideoUnavailable,
-    TooManyRequests,
-    YouTubeRequestFailed
 )
 
 test_videos = [
@@ -32,10 +30,6 @@ for video_id, name in test_videos:
         print(f"NOTFOUND: {name[:40]:40} - No transcript available")
     except VideoUnavailable:
         print(f"UNAVAIL: {name[:40]:40} - Video unavailable")
-    except TooManyRequests:
-        print(f"RATELIM: {name[:40]:40} - Rate limited (IP blocked)")
-    except YouTubeRequestFailed as e:
-        print(f"FAIL: {name[:40]:40} - {str(e)[:50]}")
     except Exception as e:
         print(f"ERROR: {name[:40]:40} - {type(e).__name__}: {str(e)[:50]}")
 

@@ -27,6 +27,7 @@ from ingest import (
 )
 from director import Director
 from gatherer import RSSGatherer, GatherScheduler
+from content_feeds import ContentFeedManager, ContentFeedScheduler
 from worker import start_background_worker, stop_background_worker, get_worker_status, run_processing_batch, is_worker_running
 from scratchpad_routes import register_scratchpad_routes
 from user_utils import generate_display_name
@@ -76,21 +77,28 @@ director = Director(supabase, broadcast_fn=broadcast_event)
 gatherer = RSSGatherer(supabase, broadcast_fn=broadcast_event)
 gather_scheduler = GatherScheduler(gatherer, interval_hours=4.0)
 
+# Content Feed Manager (quotes, xkcd, comics, etc.)
+content_feed_manager = ContentFeedManager(supabase, broadcast_fn=broadcast_event)
+content_feed_scheduler = ContentFeedScheduler(content_feed_manager, check_interval_minutes=30.0)
+
 
 # --- Lifespan (Director + Gatherer startup/shutdown) ---
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-start the director, gather scheduler, and background worker
+    # Auto-start the director, gather scheduler, content feeds, and background worker
     director.start()
     gather_scheduler.start()
+    content_feed_scheduler.start()
     start_background_worker(interval_seconds=90)  # Run processing batch every 90 seconds
-    print("[App] Ready. Director, GatherScheduler, and Worker auto-started.")
+    print("[App] Ready. Director, GatherScheduler, ContentFeedScheduler, and Worker auto-started.")
     yield
     director.stop()
     gather_scheduler.stop()
+    content_feed_scheduler.stop()
     stop_background_worker()
     await gatherer.close()
+    await content_feed_manager.close()
 
 
 app = FastAPI(title="Linksite", lifespan=lifespan)
@@ -1832,6 +1840,103 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
         }
         </script>"""
 
+        # --- Content Feeds Card ---
+        try:
+            cf_feeds = content_feed_manager.get_all_feeds()
+            cf_scheduler = content_feed_scheduler.get_status()
+            
+            cf_next_check = cf_scheduler.get("seconds_until_next", 0)
+            cf_next_min = cf_next_check // 60
+            cf_next_str = f"{cf_next_min}m" if cf_next_min > 0 else f"{cf_next_check}s"
+            
+            cf_rows = ""
+            for cf in cf_feeds:
+                cf_name = _esc(cf.get("name", "?"))
+                cf_type = cf.get("feed_type", "?")
+                cf_enabled = cf.get("enabled", True)
+                cf_last = (cf.get("last_fetched_at") or "-")[:19]
+                cf_items = cf.get("total_items_fetched", 0) or 0
+                cf_ingested = cf.get("total_items_ingested", 0) or 0
+                cf_errors = cf.get("consecutive_errors", 0) or 0
+                cf_last_error = cf.get("last_error")
+                
+                status_icon = "&#128994;" if cf_enabled and cf_errors == 0 else ("&#128308;" if cf_errors > 0 else "&#9899;")
+                status_color = "#16a34a" if cf_enabled and cf_errors == 0 else ("#dc2626" if cf_errors > 0 else "#94a3b8")
+                
+                toggle_btn = f"""<button class="btn-sm" onclick="toggleFeed('{cf_name}', this)" style="{'opacity:0.6' if not cf_enabled else ''}">{('Disable' if cf_enabled else 'Enable')}</button>"""
+                
+                error_line = f'<div style="color:#dc2626;font-size:11px;margin-top:2px">Error: {_esc((cf_last_error or "")[:60])}</div>' if cf_last_error else ""
+                
+                cf_rows += f"""<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;background:{'#fff' if cf_enabled else '#f8fafc'}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+                        <div>
+                            <span style="color:{status_color}">{status_icon}</span>
+                            <strong>{cf_name}</strong>
+                            <span style="color:#94a3b8;font-size:12px">({cf_type})</span>
+                        </div>
+                        <div style="display:flex;gap:4px">
+                            <button class="btn-sm btn-primary" onclick="fetchFeed('{cf_name}', this)">Fetch</button>
+                            {toggle_btn}
+                        </div>
+                    </div>
+                    <div style="font-size:12px;color:#64748b;margin-top:6px">
+                        Last: {_esc(cf_last)} &middot; Items: {cf_items} &middot; Ingested: {cf_ingested}
+                    </div>
+                    {error_line}
+                </div>"""
+            
+            if not cf_rows:
+                cf_rows = '<div style="color:#94a3b8;text-align:center;padding:20px">No content feeds configured</div>'
+            
+            content_feeds_html = f"""<div class="card">
+                <h2>&#128218; Content Feeds</h2>
+                <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+                    <div style="background:#f0f9ff;padding:6px 10px;border-radius:6px;font-size:12px">
+                        Next check: <strong>{cf_next_str}</strong>
+                    </div>
+                    <button class="btn btn-sm" onclick="fetchAllFeeds(this)">&#128260; Fetch All</button>
+                    <a href="/admin/content-feeds" class="btn btn-sm">View Items</a>
+                </div>
+                {cf_rows}
+            </div>
+            <script>
+            async function fetchFeed(name, btn) {{
+                btn.disabled = true;
+                btn.textContent = '...';
+                try {{
+                    const r = await fetch('/api/admin/content-feeds/' + name + '/fetch?force=true', {{method: 'POST'}});
+                    const d = await r.json();
+                    btn.textContent = d.result?.items_new || 0;
+                    setTimeout(() => {{ btn.textContent = 'Fetch'; btn.disabled = false; }}, 2000);
+                }} catch(e) {{
+                    btn.textContent = 'Error';
+                    btn.disabled = false;
+                }}
+            }}
+            async function fetchAllFeeds(btn) {{
+                btn.disabled = true;
+                btn.textContent = '...';
+                try {{
+                    await fetch('/api/admin/content-feeds/fetch-all?force=true', {{method: 'POST'}});
+                    location.reload();
+                }} catch(e) {{
+                    btn.textContent = 'Error';
+                    btn.disabled = false;
+                }}
+            }}
+            async function toggleFeed(name, btn) {{
+                btn.disabled = true;
+                try {{
+                    await fetch('/api/admin/content-feeds/' + name + '/toggle', {{method: 'POST'}});
+                    location.reload();
+                }} catch(e) {{
+                    btn.disabled = false;
+                }}
+            }}
+            </script>"""
+        except Exception as e:
+            content_feeds_html = f'<div class="card"><h2>&#128218; Content Feeds</h2><div class="msg-err">Error: {_esc(str(e))}</div></div>'
+
         # --- Assemble ---
         body = _messages(message, error)
         body += director_html
@@ -1847,8 +1952,11 @@ async def admin_dashboard(message: Optional[str] = None, error: Optional[str] = 
         body += api_health_html
         body += triggers_html
         body += '</div>'
-        body += jobs_html
+        body += '<div class="grid-2">'
+        body += content_feeds_html
         body += reddit_html
+        body += '</div>'
+        body += jobs_html
 
         return HTMLResponse(_page("Admin", body))
     except Exception as e:
@@ -2120,6 +2228,209 @@ async def process_single_feed(feed: dict):
     finally:
         _active_syncs.pop(feed_id, None)
 
+
+
+# ============================================================
+# Admin: Content Feeds API
+# ============================================================
+
+@app.get("/api/admin/content-feeds")
+async def get_content_feeds(admin: str = Depends(verify_admin)):
+    """Get all content feeds with their status."""
+    feeds = content_feed_manager.get_all_feeds()
+    scheduler_status = content_feed_scheduler.get_status()
+    return {
+        "feeds": feeds,
+        "scheduler": scheduler_status,
+    }
+
+
+@app.get("/api/admin/content-feeds/{feed_name}")
+async def get_content_feed(feed_name: str, admin: str = Depends(verify_admin)):
+    """Get a specific content feed by name."""
+    feeds = content_feed_manager.get_all_feeds()
+    feed = next((f for f in feeds if f["name"] == feed_name), None)
+    if not feed:
+        raise HTTPException(status_code=404, detail=f"Feed '{feed_name}' not found")
+    return feed
+
+
+@app.post("/api/admin/content-feeds/{feed_name}/fetch")
+async def fetch_content_feed(feed_name: str, force: bool = False, admin: str = Depends(verify_admin)):
+    """Manually trigger fetch for a specific content feed."""
+    feeds = content_feed_manager.get_all_feeds()
+    feed = next((f for f in feeds if f["name"] == feed_name), None)
+    if not feed:
+        raise HTTPException(status_code=404, detail=f"Feed '{feed_name}' not found")
+    
+    result = await content_feed_manager.fetch_feed(feed, force=force)
+    return {
+        "feed": feed_name,
+        "result": result,
+    }
+
+
+@app.post("/api/admin/content-feeds/fetch-all")
+async def fetch_all_content_feeds(force: bool = False, admin: str = Depends(verify_admin)):
+    """Manually trigger fetch for all enabled content feeds."""
+    result = await content_feed_manager.fetch_all(force=force)
+    return result
+
+
+@app.post("/api/admin/content-feeds/{feed_name}/toggle")
+async def toggle_content_feed(feed_name: str, admin: str = Depends(verify_admin)):
+    """Enable/disable a content feed."""
+    feeds = content_feed_manager.get_all_feeds()
+    feed = next((f for f in feeds if f["name"] == feed_name), None)
+    if not feed:
+        raise HTTPException(status_code=404, detail=f"Feed '{feed_name}' not found")
+    
+    new_enabled = not feed.get("enabled", True)
+    supabase.table("content_feeds").update({"enabled": new_enabled}).eq("id", feed["id"]).execute()
+    
+    return {"feed": feed_name, "enabled": new_enabled}
+
+
+@app.get("/api/admin/content-items")
+async def get_content_items(
+    limit: int = 50,
+    content_type: str = None,
+    feed_name: str = None,
+    unprocessed: bool = False,
+    admin: str = Depends(verify_admin)
+):
+    """Get recent content items from feeds."""
+    items = content_feed_manager.get_recent_items(
+        limit=limit,
+        content_type=content_type,
+        feed_name=feed_name,
+        unprocessed_only=unprocessed,
+    )
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/admin/content-items/{item_id}/ingest")
+async def ingest_content_item(item_id: int, admin: str = Depends(verify_admin)):
+    """Convert a content item to a link."""
+    link_id = await content_feed_manager.ingest_item_as_link(item_id)
+    if link_id:
+        return {"success": True, "link_id": link_id}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to ingest item")
+
+
+@app.get("/admin/content-feeds", response_class=HTMLResponse)
+async def admin_content_feeds_page(
+    feed: str = None,
+    type: str = None,
+    admin: str = Depends(verify_admin)
+):
+    """Admin page for viewing content feed items."""
+    try:
+        feeds = content_feed_manager.get_all_feeds()
+        items = content_feed_manager.get_recent_items(
+            limit=100,
+            content_type=type,
+            feed_name=feed,
+        )
+        
+        # Build feed filter dropdown
+        feed_options = '<option value="">All Feeds</option>'
+        for f in feeds:
+            selected = 'selected' if feed == f["name"] else ''
+            feed_options += f'<option value="{_esc(f["name"])}" {selected}>{_esc(f["name"])}</option>'
+        
+        # Build type filter dropdown
+        type_options = '<option value="">All Types</option>'
+        for t in ["quote", "comic", "meme", "image"]:
+            selected = 'selected' if type == t else ''
+            type_options += f'<option value="{t}" {selected}>{t.title()}</option>'
+        
+        # Build items table
+        items_html = ""
+        for item in items:
+            i_id = item.get("id")
+            i_feed = item.get("content_feeds", {}).get("name", "?")
+            i_type = item.get("content_type", "?")
+            i_title = _esc((item.get("title") or "")[:50])
+            i_content = _esc((item.get("content") or "")[:80])
+            i_author = _esc(item.get("author") or "-")
+            i_image = item.get("image_url")
+            i_source = item.get("source_url")
+            i_ingested = item.get("ingested_to_link_id")
+            i_fetched = (item.get("fetched_at") or "")[:16]
+            
+            img_preview = f'<img src="{_esc(i_image)}" style="max-width:60px;max-height:40px;border-radius:4px">' if i_image else '-'
+            
+            status = f'<a href="/link/{i_ingested}" style="color:#16a34a">Link #{i_ingested}</a>' if i_ingested else '<span style="color:#f59e0b">Pending</span>'
+            
+            ingest_btn = '' if i_ingested else f'<button class="btn-sm btn-primary" onclick="ingestItem({i_id}, this)">Ingest</button>'
+            
+            items_html += f"""<tr>
+                <td>{i_id}</td>
+                <td><span class="tag">{_esc(i_feed)}</span></td>
+                <td>{_esc(i_type)}</td>
+                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">{i_title or i_content}</td>
+                <td>{i_author}</td>
+                <td>{img_preview}</td>
+                <td>{i_fetched}</td>
+                <td>{status}</td>
+                <td>{ingest_btn}</td>
+            </tr>"""
+        
+        if not items_html:
+            items_html = '<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:30px">No content items found. Try fetching some feeds!</td></tr>'
+        
+        body = f"""
+        <div class="card">
+            <h2>&#128218; Content Feed Items</h2>
+            <form method="GET" action="/admin/content-feeds" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+                <select name="feed" onchange="this.form.submit()">{feed_options}</select>
+                <select name="type" onchange="this.form.submit()">{type_options}</select>
+                <a href="/admin/content-feeds" class="btn btn-sm">Clear Filters</a>
+                <a href="/admin" class="btn btn-sm">&larr; Back to Admin</a>
+            </form>
+            <div style="overflow-x:auto">
+            <table>
+            <thead><tr>
+                <th>ID</th>
+                <th>Feed</th>
+                <th>Type</th>
+                <th>Content</th>
+                <th>Author</th>
+                <th>Image</th>
+                <th>Fetched</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr></thead>
+            <tbody>{items_html}</tbody>
+            </table>
+            </div>
+        </div>
+        <script>
+        async function ingestItem(id, btn) {{
+            btn.disabled = true;
+            btn.textContent = '...';
+            try {{
+                const r = await fetch('/api/admin/content-items/' + id + '/ingest', {{method: 'POST'}});
+                const d = await r.json();
+                if (d.success) {{
+                    btn.parentElement.innerHTML = '<a href="/link/' + d.link_id + '" style="color:#16a34a">Link #' + d.link_id + '</a>';
+                }} else {{
+                    btn.textContent = 'Error';
+                }}
+            }} catch(e) {{
+                btn.textContent = 'Error';
+            }}
+        }}
+        </script>
+        """
+        
+        return HTMLResponse(_page("Content Feeds", body))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(_page("Error", f'<div class="msg-err">Error: {_esc(str(e))}</div>'))
 
 
 # ============================================================

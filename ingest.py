@@ -22,6 +22,14 @@ import trafilatura
 import feedparser
 from sentence_transformers import SentenceTransformer
 
+# YouTube transcript extraction (works from cloud IPs unlike yt-dlp)
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
+    YOUTUBE_TRANSCRIPT_AVAILABLE = True
+except ImportError:
+    YOUTUBE_TRANSCRIPT_AVAILABLE = False
+
 MAX_ITEMS_PER_FEED = 100
 
 # Invidious instances removed (all public instances are dead)
@@ -85,23 +93,38 @@ class ContentExtractor:
             channel_name = data.get("author_name", "")
             thumbnail = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
 
+            # Try to fetch transcript via youtube-transcript-api
+            transcript = ""
+            has_captions = False
+            if YOUTUBE_TRANSCRIPT_AVAILABLE:
+                try:
+                    ytt_api = YouTubeTranscriptApi()
+                    result = ytt_api.fetch(video_id)
+                    transcript = ' '.join([s.text for s in result.snippets])
+                    has_captions = bool(transcript)
+                except (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable):
+                    pass  # No transcript available for this video
+                except Exception as e:
+                    # Rate limited or other error - fail silently
+                    print(f"[Ingest] YouTube transcript fetch failed for {video_id}: {e}")
+
             return {
                 "title": title,
                 "channel_name": channel_name,
                 "description": title,
-                "content": "",
+                "content": transcript[:CONTENT_MAX_CHARS] if transcript else "",
                 "thumbnail": thumbnail,
                 "type": "youtube",
                 "tags": [],
                 "duration": 0,
                 "view_count": 0,
-                "has_captions": False,
+                "has_captions": has_captions,
                 "meta": {
                     "type": "youtube",
                     "channel_name": channel_name,
-                    "has_captions": False,
+                    "has_captions": has_captions,
                 },
-                "transcript": "",
+                "transcript": transcript,
             }
 
         except Exception as e:

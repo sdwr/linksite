@@ -6,13 +6,13 @@ Testing performed from Fly.io Sprite (cloud IP) on 2025-02-06.
 
 | Site | Status | Content Quality | Issue |
 |------|--------|-----------------|-------|
-| YouTube | ✅ FIXED | Full transcripts via youtube-transcript-api | yt-dlp blocked, but transcript API works |
-| BBC News | ✅ OK | 6953 chars | trafilatura works |
+| YouTube | ✅ FIXED | 2089 chars (full transcript) | yt-dlp blocked, but youtube-transcript-api works! |
+| BBC News | ✅ OK | 6864 chars | trafilatura works |
 | Ars Technica | ✅ OK | 3207 chars | trafilatura works |
-| Hacker News | ✅ OK | 3845 chars | trafilatura works |
+| Hacker News | ✅ OK | 3867 chars | trafilatura works |
 | Cloudflare | ✅ OK | 2262 chars | trafilatura works |
 | GitHub | ⚠️ WEAK | 967 chars | Minimal content extracted |
-| Reddit | ⚠️ WEAK | 741 chars | Minimal content (already using API for feeds) |
+| Reddit | ⚠️ INTERMITTENT | 741 chars or FAIL | Sometimes blocked, use RSS feeds instead |
 | Twitter/X | ⚠️ WEAK | 293 chars, no title | Login wall, minimal content |
 | LinkedIn | ⚠️ WEAK | 223 chars | Login wall |
 | Medium | ❌ BLOCKED | 0 chars | Complete fetch failure |
@@ -32,7 +32,7 @@ The `youtube-transcript-api` Python library works from cloud IPs!
 pip install youtube-transcript-api
 ```
 
-**Usage:**
+**Usage (new API in v1.2.4+):**
 ```python
 from youtube_transcript_api import YouTubeTranscriptApi
 
@@ -40,6 +40,8 @@ ytt_api = YouTubeTranscriptApi()
 result = ytt_api.fetch(video_id)
 text = ' '.join([s.text for s in result.snippets])
 ```
+
+**Note:** The API changed in v1.2.4 - use `ytt_api.fetch()` not `YouTubeTranscriptApi.get_transcript()`.
 
 **Caveats:**
 - Rate limited after multiple rapid requests (fine for single-link submissions)
@@ -134,9 +136,27 @@ def try_archive_org(url):
 | 🔵 Accept | LinkedIn | Accept minimal content |
 | 🔵 Accept | GitHub | Accept minimal content |
 
+## Reddit: INTERMITTENT ⚠️
+
+### Problem
+- Direct page scraping sometimes blocked from cloud IPs
+- RSS feeds work reliably
+
+### Recommendation
+Use RSS feeds for Reddit content (already implemented in `ingest.py`).
+Direct page scraping should fall back gracefully.
+
 ## Implementation Status
 
 - [x] youtube-transcript-api added to ingest.py
+- [x] Graceful fallback when transcripts unavailable
 - [ ] cloudscraper for Medium (future)
 - [ ] Archive.org fallback (future)
 - [ ] Rate limiting handling (future)
+
+## Dependencies Added
+
+Add to `requirements.txt`:
+```
+youtube-transcript-api>=1.2.4
+```

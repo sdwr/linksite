@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test youtube-transcript-api from cloud sprite."""
+"""Test youtube-transcript-api from cloud sprite - working version."""
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
     TranscriptsDisabled, 
@@ -18,11 +18,13 @@ print("=" * 70)
 print("YOUTUBE TRANSCRIPT API TEST (from cloud sprite)")
 print("=" * 70)
 
+ytt_api = YouTubeTranscriptApi()
+
 for video_id, name in test_videos:
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        text = ' '.join([t['text'] for t in transcript])
-        print(f"OK: {name[:40]:40} - {len(transcript):4} segments, {len(text):6} chars")
+        result = ytt_api.fetch(video_id)
+        text = ' '.join([s.text for s in result.snippets])
+        print(f"OK: {name[:40]:40} - {len(result.snippets):4} segments, {len(text):6} chars")
         print(f"    First 100 chars: {text[:100]}...")
     except TranscriptsDisabled:
         print(f"BLOCKED: {name[:40]:40} - Transcripts disabled for this video")
@@ -31,6 +33,6 @@ for video_id, name in test_videos:
     except VideoUnavailable:
         print(f"UNAVAIL: {name[:40]:40} - Video unavailable")
     except Exception as e:
-        print(f"ERROR: {name[:40]:40} - {type(e).__name__}: {str(e)[:50]}")
+        print(f"ERROR: {name[:40]:40} - {type(e).__name__}: {str(e)[:60]}")
 
 print("=" * 70)

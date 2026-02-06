@@ -629,6 +629,7 @@ class ContentFeedManager:
                 "url": source_url,
                 "title": item.get("title") or f"{item.get('content_type', 'content').title()} from {feed_name}",
                 "description": item.get("content"),
+                "source": f"content:{feed_name}",  # Track which feed this came from
                 "meta_json": {
                     "content_feed": feed_name,
                     "content_type": item.get("content_type"),
